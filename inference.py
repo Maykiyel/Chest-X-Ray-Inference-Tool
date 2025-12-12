@@ -30,11 +30,7 @@ def load_models(model_names, device='cpu'):
             elif name == 'mimic':
                 model = xrv.models.DenseNet(weights="densenet121-res224-mimic_nb")
             elif name == 'chexpert':
-                # ChexPert model uses different loading method
                 model = xrv.models.DenseNet(weights="densenet121-res224-all")
-                # Alternative: if you want the actual baseline model
-                # import torchxrayvision.baseline_models as baseline_models
-                # model = baseline_models.chexpert.DenseNet(weights="densenet121-res224-chexpert")
             else:
                 continue
             
@@ -65,9 +61,20 @@ def preprocess_image(img_path, target_size=224):
     # Read image
     img = skimage.io.imread(str(img_path))
     
-    # Convert to grayscale if needed
-    if len(img.shape) > 2:
+    # Handle different image formats
+    if len(img.shape) == 3:
+        # If image has 4 channels (RGBA), convert to RGB first
+        if img.shape[2] == 4:
+            # Drop alpha channel
+            img = img[:, :, :3]
+        
+        # Convert RGB to grayscale
         img = skimage.color.rgb2gray(img)
+    elif len(img.shape) == 2:
+        # Already grayscale
+        pass
+    else:
+        raise ValueError(f"Unexpected image shape: {img.shape}")
     
     # Normalize to [0, 1]
     img = img.astype(np.float32)
@@ -78,7 +85,6 @@ def preprocess_image(img_path, target_size=224):
     img = skimage.transform.resize(img, (target_size, target_size), mode='constant')
     
     # Normalize using dataset statistics
-    # TorchXRayVision uses specific normalization
     img = (img - 0.5) / 0.5
     
     # Add channel dimension and convert to tensor
@@ -126,12 +132,9 @@ def predict_single_image(img_path, model, model_name, device='cpu'):
         })
     
     # Calculate "Normal" probability
-    # Normal = 1 - max(all pathology probabilities)
-    # This represents the likelihood that no significant pathology is present
     max_pathology_prob = float(np.max(predictions))
     normal_prob = 1.0 - max_pathology_prob
     
-    # Add Normal as a prediction
     results.append({
         'filename': Path(img_path).name,
         'filepath': str(img_path),
@@ -161,6 +164,8 @@ class XRayDataset(Dataset):
             img_tensor = preprocess_image(img_path, self.target_size)
             return img_tensor.squeeze(0), str(img_path), True
         except Exception as e:
+            # Log the error for debugging
+            print(f"Error loading {img_path}: {str(e)}")
             # Return dummy data if image fails to load
             return torch.zeros(self.target_size, self.target_size), str(img_path), False
 
@@ -188,7 +193,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,  # Set to 0 for Streamlit compatibility
+        num_workers=0,
         pin_memory=(device == 'cuda')
     )
     
