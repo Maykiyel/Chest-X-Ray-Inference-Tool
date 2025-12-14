@@ -2,48 +2,129 @@
 xray_env/
 venv/
 env/
+ENV/
+.venv/
 
-# Python cache
+# Python cache and compiled files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Temporary files
 temp_*
 *.tmp
+.temp/
+tmp/
 
 # Results and outputs
 batch_results_*.csv
 roc_curve_*.html
 xray_predictions_*.csv
+*.csv
+*.html
 
-# IDE
+# Exception: Keep example files if you add them
+!example_*.csv
+!README.md
+
+# Model cache and downloads
+.cache/
+models/
+*.pth
+*.pt
+*.ckpt
+
+# Streamlit cache
+.streamlit/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE and Editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
-# OS
+# Operating System files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
-desktop.ini
+Desktop.ini
 
-# Streamlit
-.streamlit/
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-# Model cache
-.cache/
-models/
+# Logs
+*.log
+logs/
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+pytestdebug.log
 
-# Data folders (uncomment if you don't want to commit datasets)
+# Documentation builds
+docs/_build/
+site/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Data directories (uncomment if you don't want to commit datasets)
 # data/
 # dataset/
 # images/
 # xrays/
+# samples/
+
+# Large files (optional - uncomment if needed)
+# *.zip
+# *.tar.gz
+# *.rar
+# *.7z
+
+# Backup files
+*.bak
+*.backup
+*~

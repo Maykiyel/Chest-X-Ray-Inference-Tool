@@ -2,84 +2,113 @@
 
 A professional, GPU-accelerated application for chest X-ray analysis using state-of-the-art deep learning models from TorchXRayVision.
 
-## Features
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Streamlit](https://img.shields.io/badge/streamlit-1.28+-red.svg)
+![PyTorch](https://img.shields.io/badge/pytorch-2.0+-orange.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+
+---
+
+## 🌟 Features
 
 ✅ **Multi-Model Support**
-- NIH Model (DenseNet121)
-- MIMIC Model
-- CheXpert Baseline Model
+- NIH Model (DenseNet121 - ChestX-ray14)
+- MIMIC Model (DenseNet121 - MIMIC-CXR)
+- CheXpert Model (DenseNet121 - CheXpert)
 
 ✅ **Advanced Capabilities**
-- Single image and batch folder processing
-- GPU acceleration with CUDA support
+- Custom pathology selection before scanning
+- Single image and batch folder processing (150+ images)
 - Automatic ground truth label detection from folder structure
-- ROC/AUC analysis with interactive plots
-- CSV export of all predictions
-- Real-time progress tracking
+- Smooth ROC/AUC curves with interpolation for small datasets
+- GPU acceleration with CUDA support
+- Real-time progress tracking with time estimates
+- CSV export with full metadata
 
-✅ **Performance Optimizations**
-- Model caching for fast repeated inference
-- Batch processing with PyTorch DataLoader
-- Efficient preprocessing pipeline
-- Memory-optimized inference with `torch.no_grad()`
+✅ **Smart Features**
+- Automatic "Normal" X-ray detection
+- Interactive visualizations with Plotly
+- Model comparison and ensemble analysis
+- Configurable batch sizes and thresholds
 
-## Installation
+---
 
-### Prerequisites
-- Python 3.8 or higher
-- CUDA-compatible GPU (optional, but recommended for performance)
+## 🚀 Installation
 
-### Setup
+### One-Command Setup (Recommended)
 
-1. **Clone or download this repository**
-
-2. **Install dependencies**
 ```bash
-pip install -r requirements.txt
+python install_pytorch.py
 ```
 
-3. **Verify installation**
+That's it! The script automatically:
+- ✅ Creates virtual environment
+- ✅ Detects GPU and installs appropriate PyTorch version
+- ✅ Installs all dependencies
+- ✅ Verifies installation
+
+**Time:** 10-15 minutes (first time only)
+
+### After Installation
+
+**Activate virtual environment:**
+
 ```bash
-python -c "import torchxrayvision; print('Installation successful!')"
+# Windows (Command Prompt)
+xray_env\Scripts\activate.bat
+
+# Windows (PowerShell)
+xray_env\Scripts\Activate.ps1
+
+# Linux/macOS
+source xray_env/bin/activate
 ```
 
-## Usage
-
-### Starting the Application
+**Run the application:**
 
 ```bash
 streamlit run app.py
 ```
 
-The application will open in your default web browser at `http://localhost:8501`
+**Open browser:** `http://localhost:8501`
 
-### Multiple Image Analysis
+---
 
-1. Navigate to the **"Single/Batch Inference"** tab
-2. Select the models you want to use in the sidebar
-3. Upload one or more X-ray images (PNG, JPG, JPEG, DICOM)
-   - Drag and drop multiple files
-   - Or click "Browse files" to select multiple images
-4. Click **"Analyze Images"**
-5. View results and top predictions
+## 📖 Quick Start Guide
 
-### Batch Folder Processing
+### 1. Select Your Pathologies
 
-1. Navigate to the **"Single/Batch Inference"** tab
-2. Select the models you want to use
-3. Enter the path to your image folder
-4. Adjust batch size (recommended: 16 for GPU, 4 for CPU)
-5. Enable "Search subfolders recursively" if needed
-6. Enable "Auto-detect labels from folder names" for ground truth detection
-7. Click **"Process Batch"**
-8. View real-time progress, estimated time, and statistics
-9. Results available in the **"Results & Analysis"** tab
+In the sidebar, choose which pathologies to analyze:
+- **Quick buttons:** "Select Common" or "Select All"
+- **Custom selection:** Pick specific pathologies from the list
 
-**Note:** The tool can efficiently handle large datasets (150+ images per pathology)
+**Available pathologies:** Atelectasis, Cardiomegaly, Consolidation, Edema, Effusion, Emphysema, Fibrosis, Hernia, Infiltration, Mass, Nodule, Pleural_Thickening, Pneumonia, Pneumothorax, Normal
 
-### Folder Structure for Auto-Labeling
+### 2. Upload Images
 
-To enable automatic ground truth detection, organize your images like this:
+**Option A: Multiple Images**
+- Drag and drop images or click "Browse files"
+- Select one or multiple X-ray images (PNG, JPG, JPEG, DICOM)
+- Click "🔍 Analyze Images"
+- View results immediately
+
+**Option B: Batch Processing**
+- Organize images in folders (see folder structure below)
+- Enter folder path
+- Set batch size (16 for GPU, 4 for CPU)
+- Enable "Auto-detect labels" for ground truth
+- Click "🚀 Process Batch"
+
+### 3. View Results
+
+- **Results & Analysis tab:** View predictions, filter, download CSV
+- **ROC/AUC Curves tab:** Compare model performance (requires labeled data)
+
+---
+
+## 📁 Folder Structure for Auto-Labeling
+
+For automatic ground truth detection:
 
 ```
 dataset/
@@ -95,121 +124,238 @@ dataset/
     ├── image6.png
 ```
 
-Supported naming patterns:
+**Supported naming patterns:**
 - `{pathology}_positive` / `{pathology}_negative`
 - `{pathology}_1` / `{pathology}_0`
 - `positive_{pathology}` / `negative_{pathology}`
+- `normal` (for normal X-rays)
+
+---
+
+## 🎯 Usage Examples
+
+### Example 1: Quick Screening (Multiple Images)
+
+1. Select "Common" pathologies in sidebar
+2. Upload 5-10 X-ray images
+3. Click "Analyze Images"
+4. Review top predictions for each image
+5. Done! (~30-60 seconds)
+
+### Example 2: Large Dataset Analysis (150+ images)
+
+1. Organize images by condition in folders
+2. Select pathologies to focus on
+3. Enter folder path
+4. Set batch size to 16 (GPU) or 4 (CPU)
+5. Enable "Auto-detect labels"
+6. Click "Process Batch"
+7. Monitor real-time progress
+8. Export results to CSV
+9. Generate ROC curves for model evaluation
+
+### Example 3: Model Comparison
+
+1. Process same images with all 3 models
+2. Go to "Results & Analysis" tab
+3. Compare predictions side-by-side
+4. Use "ROC/AUC Curves" tab to evaluate performance
+5. Select "All Models" for direct comparison
+
+---
+
+## ⚙️ Configuration
+
+### Batch Size Guidelines
+
+**GPU (with 8GB+ VRAM):**
+- Batch size: 16-32
+- Speed: ~2-5 seconds per image
+
+**GPU (with 4-6GB VRAM):**
+- Batch size: 8-16
+- Speed: ~2-5 seconds per image
+
+**CPU:**
+- Batch size: 1-4
+- Speed: ~15-30 seconds per image
+
+### Device Selection
+
+- **GPU (CUDA):** Automatically detected, 10-30x faster
+- **CPU:** Always available, good for small batches
+
+Switch between devices in the sidebar.
+
+---
+
+## 📊 Understanding Results
+
+### Pathology Predictions
+
+Each prediction shows:
+- **Pathology name:** e.g., Pneumonia, Effusion, Normal
+- **Probability:** 0.0 to 1.0 (higher = more confident)
+- **Model:** Which model made the prediction
+
+### Probability Interpretation
+
+- **0.0 - 0.3:** Low likelihood
+- **0.3 - 0.6:** Moderate likelihood
+- **0.6 - 1.0:** High likelihood
+
+⚠️ **Important:** These are research predictions, not clinical diagnoses. Always consult medical professionals.
+
+### Normal Detection
+
+The app automatically calculates "Normal" probability as:
+```
+Normal Probability = 1.0 - max(all pathology probabilities)
+```
+
+High normal probability indicates the X-ray appears normal.
 
 ### ROC/AUC Analysis
 
-1. Process images with ground truth labels
-2. Navigate to the **"ROC/AUC Curves"** tab
-3. Select a model and pathology
-4. Click **"Generate ROC Curve"**
-5. View AUC score and interactive ROC plot
+- **AUC Score:** 0.5 = random, 1.0 = perfect
+- **Typical range:** 0.70-0.95 for common pathologies
+- **Smooth curves:** Interpolated from actual data points
+- **Jagged curves:** Normal for small datasets (<50 samples)
 
-### Exporting Results
+---
 
-1. Navigate to the **"Results & Analysis"** tab
-2. Apply filters if desired
-3. Click **"Download Results CSV"**
-4. The CSV contains all predictions with timestamps
+## 🌐 Cloud Deployment
 
-## File Structure
+### Streamlit Community Cloud (FREE)
+
+**Pros:**
+- ✅ 100% FREE
+- ✅ Easy 3-click deployment
+- ✅ No Docker knowledge needed
+
+**Cons:**
+- ❌ CPU only (15-30s per image)
+- ❌ Limited RAM (1GB)
+
+**Deploy:**
+1. Push code to GitHub
+2. Go to https://share.streamlit.io/
+3. Connect repository
+4. Deploy!
+
+### Hugging Face Spaces (FREE + GPU Option)
+
+**Pros:**
+- ✅ FREE CPU tier (2GB RAM)
+- ✅ Optional GPU ($0.60/hour)
+- ✅ Better for ML apps
+
+**Cons:**
+- ❌ GPU expensive for 24/7 (~$432/month)
+
+**Deploy:**
+1. Create account at https://huggingface.co/
+2. Create new Space
+3. Upload files
+4. Choose hardware (CPU free, GPU paid)
+
+**Recommended:** Free CPU tier for demos, GPU only when needed.
+
+---
+
+## 🔧 Troubleshooting
+
+### Installation Issues
+
+**Issue: "python: command not found"**
+```bash
+# Use python3 instead
+python3 install_pytorch.py
+```
+
+**Issue: PowerShell execution policy error**
+```powershell
+# Run as Administrator
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+**Issue: GPU not detected**
+1. Check NVIDIA drivers: `nvidia-smi`
+2. Install CUDA toolkit matching PyTorch version
+3. Restart computer
+
+### Runtime Issues
+
+**Issue: "Out of memory"**
+- Reduce batch size to 1-4
+- Use only 1 model at a time
+- Close other applications
+- Clear CUDA cache (automatic)
+
+**Issue: "No images found"**
+- Check folder path is correct
+- Verify image extensions (.png, .jpg, .jpeg, .dcm)
+- Enable "Search subfolders recursively"
+
+**Issue: "Models won't download"**
+- Check internet connection
+- Check firewall settings
+- Models download automatically on first use (~500MB each)
+
+**Issue: ROC curve not available**
+- Need labeled data (organize in folders)
+- Need at least 10 samples per pathology
+- Enable "Auto-detect labels from folder names"
+
+**Issue: App is slow**
+- Expected on CPU (15-30s per image)
+- Use GPU for 10-30x speedup
+- Reduce batch size
+- Process overnight for large datasets
+
+### Image Quality Issues
+
+**Best results:**
+- ✅ Frontal chest X-rays (PA or AP view)
+- ✅ DICOM or high-quality PNG/JPG
+- ✅ Full chest visible
+- ❌ Avoid lateral views
+- ❌ Avoid severely cropped images
+
+---
+
+## 🏗️ Project Structure
 
 ```
 xray-inference-tool/
-├── app.py              # Main Streamlit application
-├── inference.py        # Model loading and inference logic
-├── utils.py            # Helper functions and utilities
-├── metrics.py          # ROC/AUC calculations and plotting
-├── requirements.txt    # Python dependencies
-└── README.md          # This file
+├── app.py                  # Main Streamlit application
+├── inference.py            # Model loading and inference
+├── utils.py                # Helper functions
+├── metrics.py              # ROC/AUC calculations
+├── config.py               # Configuration settings
+├── install_pytorch.py      # Automated setup script
+├── requirements.txt        # Python dependencies
+├── .gitignore              # Git ignore rules
+└── README.md               # This file
 ```
 
-## Supported Models
+**Total:** 8 essential files (~200-500 KB)
 
-### NIH Model
-- **Architecture**: DenseNet121
-- **Training Data**: NIH ChestX-ray14 dataset
-- **Pathologies**: 14 thoracic diseases
+---
 
-### MIMIC Model
-- **Architecture**: DenseNet121
-- **Training Data**: MIMIC-CXR dataset
-- **Pathologies**: Multiple thoracic conditions
+## 🤝 Contributing
 
-### CheXpert Model
-- **Architecture**: DenseNet121
-- **Training Data**: CheXpert dataset
-- **Pathologies**: 14 observations
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
-## Performance Tips
+---
 
-### For Best Performance:
+## 📝 Citation
 
-1. **Use GPU**: The application automatically detects and uses CUDA if available
-2. **Batch Processing**: Process multiple images at once for better efficiency
-3. **Adjust Batch Size**: 
-   - GPU with 8GB+ VRAM: Use batch size 16-32
-   - GPU with 4-6GB VRAM: Use batch size 8-16
-   - CPU: Use batch size 1-4
-4. **Model Caching**: Models are cached after first load - keep the app running for repeated inference
-5. **Large Datasets**: The tool efficiently handles 150+ images per pathology with automatic memory management
-
-### Memory Requirements:
-
-- **CPU Mode**: ~2-4 GB RAM
-- **GPU Mode**: ~4-8 GB VRAM (depending on batch size)
-- **Large batches (150+ images)**: Handled efficiently with automatic CUDA cache clearing
-
-## Troubleshooting
-
-### Issue: "CUDA out of memory"
-**Solution**: Reduce batch size in the sidebar settings
-
-### Issue: "No images found"
-**Solution**: 
-- Check the folder path is correct
-- Ensure images have supported extensions (.png, .jpg, .jpeg, .dcm)
-- Enable "Search subfolders recursively" if images are in subdirectories
-
-### Issue: Models fail to load
-**Solution**: 
-- Ensure you have an internet connection (models download on first use)
-- Check that `torchxrayvision` is properly installed
-- Try reinstalling: `pip install --upgrade torchxrayvision`
-
-### Issue: ROC curve not available
-**Solution**: 
-- Ensure images have ground truth labels
-- Check folder naming follows supported patterns
-- Enable "Auto-detect labels from folder names"
-
-## Technical Details
-
-### Preprocessing Pipeline
-1. Images loaded with scikit-image
-2. Converted to grayscale if needed
-3. Normalized to [0, 1] range
-4. Resized to 224x224 pixels
-5. Normalized using dataset statistics: (x - 0.5) / 0.5
-
-### Inference Pipeline
-1. Images batched using PyTorch DataLoader
-2. Batch moved to GPU (if available)
-3. Forward pass with `torch.no_grad()`
-4. Sigmoid activation for probabilities
-5. Results collected and formatted
-
-### Metrics Calculations
-- **ROC/AUC**: Computed using `sklearn.metrics.roc_curve` and `roc_auc_score`
-- **Optimal Threshold**: Determined using Youden's J statistic
-- All metrics follow scikit-learn standards
-
-## Citation
-
-If you use this tool in your research, please cite TorchXRayVision:
+If using TorchXRayVision in research, please cite:
 
 ```bibtex
 @article{Cohen2020xrv,
@@ -221,23 +367,43 @@ If you use this tool in your research, please cite TorchXRayVision:
 }
 ```
 
-## License
+---
 
-This tool is provided as-is for research and educational purposes. The underlying TorchXRayVision library and models have their own licenses - please refer to the [TorchXRayVision repository](https://github.com/mlmed/torchxrayvision) for details.
+## 📄 License
 
-## Support
+This project is licensed under the MIT License. See LICENSE file for details.
 
-For issues related to:
-- **This tool**: Check the troubleshooting section above
-- **TorchXRayVision**: Visit https://github.com/mlmed/torchxrayvision
-- **Streamlit**: Visit https://docs.streamlit.io
+The underlying TorchXRayVision library and models have their own licenses - see https://github.com/mlmed/torchxrayvision for details.
 
-## Acknowledgments
+---
 
-- TorchXRayVision team for the excellent models and library
-- Streamlit for the amazing web framework
-- The medical imaging community for open datasets
+## ⚠️ Disclaimer
+
+**This tool is for research and educational purposes only.** It is not intended for clinical use or medical diagnosis. Always consult qualified medical professionals for health-related decisions.
+
+---
+
+## 🔗 Resources
+
+- **TorchXRayVision:** https://github.com/mlmed/torchxrayvision
+- **Streamlit:** https://streamlit.io/
+- **PyTorch:** https://pytorch.org/
+- **Report Issues:** [GitHub Issues](https://github.com/YOUR_USERNAME/xray-inference-tool/issues)
+
+---
+
+## 🎉 Quick Reference
+
+| Command | Purpose |
+|---------|---------|
+| `python install_pytorch.py` | Complete setup |
+| `xray_env\Scripts\activate` | Activate (Windows) |
+| `source xray_env/bin/activate` | Activate (Linux/macOS) |
+| `streamlit run app.py` | Run the app |
+| `deactivate` | Deactivate environment |
 
 ---
 
 **Built with ❤️ using Streamlit and PyTorch**
+
+**Questions?** Open an issue on GitHub or check the troubleshooting section above.
