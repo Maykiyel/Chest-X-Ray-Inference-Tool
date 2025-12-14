@@ -162,12 +162,13 @@ class XRayDataset(Dataset):
         
         try:
             img_tensor = preprocess_image(img_path, self.target_size)
-            return img_tensor.squeeze(0), str(img_path), True
+            # Don't squeeze - keep shape as [1, H, W] for proper batching
+            return img_tensor, str(img_path), True
         except Exception as e:
             # Log the error for debugging
             print(f"Error loading {img_path}: {str(e)}")
-            # Return dummy data if image fails to load
-            return torch.zeros(self.target_size, self.target_size), str(img_path), False
+            # Return dummy data with correct shape [1, H, W]
+            return torch.zeros(1, self.target_size, self.target_size), str(img_path), False
 
 
 def predict_batch(image_paths, model, model_name, device='cpu', 

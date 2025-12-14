@@ -162,7 +162,8 @@ def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
         mode='lines',
         name=f'ROC Curve (AUC = {auc_score:.4f})',
         line=dict(color='#1f77b4', width=3),
-        hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>'
+        hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
+        showlegend=True
     ))
     
     # Diagonal reference line (random classifier)
@@ -172,7 +173,8 @@ def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
         mode='lines',
         name='Random Classifier',
         line=dict(color='gray', width=2, dash='dash'),
-        hoverinfo='skip'
+        hoverinfo='skip',
+        showlegend=True
     ))
     
     # Layout
@@ -181,24 +183,47 @@ def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
             'text': title,
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 20}
+            'font': {'size': 18, 'color': '#333'}
         },
         xaxis_title='False Positive Rate (1 - Specificity)',
         yaxis_title='True Positive Rate (Sensitivity)',
-        xaxis=dict(range=[0, 1], gridcolor='lightgray'),
-        yaxis=dict(range=[0, 1], gridcolor='lightgray'),
-        width=800,
-        height=600,
+        xaxis=dict(
+            range=[0, 1], 
+            gridcolor='#e0e0e0',
+            showgrid=True,
+            zeroline=True,
+            zerolinecolor='#999',
+            zerolinewidth=1,
+            title_font=dict(size=14, color='#333'), 
+            tickfont=dict(size=12, color='#333')    
+        ),
+        yaxis=dict(
+            range=[0, 1], 
+            gridcolor='#e0e0e0',
+            showgrid=True,
+            zeroline=True,
+            zerolinecolor='#999',
+            zerolinewidth=1,
+            title_font=dict(size=14, color='#333'), 
+            tickfont=dict(size=12, color='#333')    
+        ),
+        width=None,  
+        height=500,
         showlegend=True,
         legend=dict(
-            x=0.6,
-            y=0.1,
-            bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='gray',
-            borderwidth=1
+            x=0.98,
+            y=0.02,
+            xanchor='right',
+            yanchor='bottom',
+            bgcolor='rgba(255, 255, 255, 0.95)',
+            bordercolor='#ccc',
+            borderwidth=1,
+            font=dict(size=12, color='#333') 
         ),
         plot_bgcolor='white',
-        hovermode='closest'
+        paper_bgcolor='white',
+        hovermode='closest',
+        margin=dict(l=60, r=20, t=60, b=60)
     )
     
     return fig
@@ -226,7 +251,8 @@ def plot_precision_recall_curve(precision, recall, avg_precision, title="Precisi
         mode='lines',
         name=f'PR Curve (AP = {avg_precision:.4f})',
         line=dict(color='#2ca02c', width=3),
-        hovertemplate='Recall: %{x:.4f}<br>Precision: %{y:.4f}<extra></extra>'
+        hovertemplate='Recall: %{x:.4f}<br>Precision: %{y:.4f}<extra></extra>',
+        showlegend=True
     ))
     
     # Layout
@@ -235,24 +261,41 @@ def plot_precision_recall_curve(precision, recall, avg_precision, title="Precisi
             'text': title,
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 20}
+            'font': {'size': 18, 'color': '#333'}
         },
         xaxis_title='Recall (Sensitivity)',
         yaxis_title='Precision',
-        xaxis=dict(range=[0, 1], gridcolor='lightgray'),
-        yaxis=dict(range=[0, 1], gridcolor='lightgray'),
-        width=800,
-        height=600,
+        xaxis=dict(
+            range=[0, 1], 
+            gridcolor='#e0e0e0',
+            showgrid=True,
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333')
+        ),
+        yaxis=dict(
+            range=[0, 1], 
+            gridcolor='#e0e0e0',
+            showgrid=True,
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333')
+        ),
+        width=None,
+        height=500,
         showlegend=True,
         legend=dict(
-            x=0.6,
-            y=0.9,
-            bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='gray',
-            borderwidth=1
+            x=0.98,
+            y=0.98,
+            xanchor='right',
+            yanchor='top',
+            bgcolor='rgba(255, 255, 255, 0.95)',
+            bordercolor='#ccc',
+            borderwidth=1,
+            font=dict(size=12, color='#333') 
         ),
         plot_bgcolor='white',
-        hovermode='closest'
+        paper_bgcolor='white',
+        hovermode='closest',
+        margin=dict(l=60, r=20, t=60, b=60)
     )
     
     return fig
@@ -301,13 +344,23 @@ def plot_confusion_matrix(cm, labels=['Negative', 'Positive'], title="Confusion 
             'text': title,
             'x': 0.5,
             'xanchor': 'center',
-            'font': {'size': 20}
+            'font': {'size': 18, 'color': '#333'}
         },
         xaxis_title='Predicted Label',
         yaxis_title='True Label',
-        width=600,
-        height=600,
-        annotations=annotations
+        xaxis=dict(
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333')
+        ),
+        yaxis=dict(
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333')
+        ),
+        width=None,
+        height=500,
+        annotations=annotations,
+        plot_bgcolor='white',
+        paper_bgcolor='white'
     )
     
     return fig
@@ -336,7 +389,8 @@ def compare_models_roc(results_dict):
             mode='lines',
             name=f'{model_name} (AUC = {auc_score:.4f})',
             line=dict(color=color, width=2),
-            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>'
+            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
+            showlegend=True
         ))
     
     # Diagonal reference line
@@ -346,19 +400,50 @@ def compare_models_roc(results_dict):
         mode='lines',
         name='Random',
         line=dict(color='gray', width=2, dash='dash'),
-        hoverinfo='skip'
+        hoverinfo='skip',
+        showlegend=True
     ))
     
     fig.update_layout(
-        title='Model Comparison - ROC Curves',
+        title={
+            'text': 'Model Comparison - ROC Curves',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 18, 'color': '#333'}
+        },
         xaxis_title='False Positive Rate',
         yaxis_title='True Positive Rate',
-        xaxis=dict(range=[0, 1]),
-        yaxis=dict(range=[0, 1]),
-        width=900,
-        height=700,
+        xaxis=dict(
+            range=[0, 1],
+            gridcolor='#e0e0e0',
+            showgrid=True,
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333')
+        ),
+        yaxis=dict(
+            range=[0, 1],
+            gridcolor='#e0e0e0',
+            showgrid=True,
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333')
+        ),
+        width=None,
+        height=600,
         showlegend=True,
-        plot_bgcolor='white'
+        legend=dict(
+            x=0.98,
+            y=0.02,
+            xanchor='right',
+            yanchor='bottom',
+            bgcolor='rgba(255, 255, 255, 0.95)',
+            bordercolor='#ccc',
+            borderwidth=1,
+            font=dict(size=11, color='#333')
+        ),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        hovermode='closest',
+        margin=dict(l=60, r=20, t=60, b=60)
     )
     
     return fig

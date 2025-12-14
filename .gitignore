@@ -1,2 +1,49 @@
 # Python virtual environment
 xray_env/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Temporary files
+temp_*
+*.tmp
+
+# Results and outputs
+batch_results_*.csv
+roc_curve_*.html
+xray_predictions_*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Streamlit
+.streamlit/
+
+# Model cache
+.cache/
+models/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data folders (uncomment if you don't want to commit datasets)
+# data/
+# dataset/
+# images/
+# xrays/
