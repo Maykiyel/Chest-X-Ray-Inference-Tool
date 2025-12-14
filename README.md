@@ -224,45 +224,6 @@ High normal probability indicates the X-ray appears normal.
 
 ---
 
-## 🌐 Cloud Deployment
-
-### Streamlit Community Cloud (FREE)
-
-**Pros:**
-- ✅ 100% FREE
-- ✅ Easy 3-click deployment
-- ✅ No Docker knowledge needed
-
-**Cons:**
-- ❌ CPU only (15-30s per image)
-- ❌ Limited RAM (1GB)
-
-**Deploy:**
-1. Push code to GitHub
-2. Go to https://share.streamlit.io/
-3. Connect repository
-4. Deploy!
-
-### Hugging Face Spaces (FREE + GPU Option)
-
-**Pros:**
-- ✅ FREE CPU tier (2GB RAM)
-- ✅ Optional GPU ($0.60/hour)
-- ✅ Better for ML apps
-
-**Cons:**
-- ❌ GPU expensive for 24/7 (~$432/month)
-
-**Deploy:**
-1. Create account at https://huggingface.co/
-2. Create new Space
-3. Upload files
-4. Choose hardware (CPU free, GPU paid)
-
-**Recommended:** Free CPU tier for demos, GPU only when needed.
-
----
-
 ## 🔧 Troubleshooting
 
 ### Installation Issues
