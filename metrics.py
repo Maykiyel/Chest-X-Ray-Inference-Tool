@@ -30,6 +30,31 @@ def compute_roc_auc(y_true, y_pred) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
     return fpr, tpr, thresholds, auc_score
 
 
+def interpolate_roc_curve(fpr, tpr, num_points=100):
+    """
+    Interpolate ROC curve for smoother visualization.
+    
+    Args:
+        fpr: False positive rates
+        tpr: True positive rates
+        num_points: Number of interpolation points
+    
+    Returns:
+        Tuple of (interpolated_fpr, interpolated_tpr)
+    """
+    # Create evenly spaced points
+    mean_fpr = np.linspace(0, 1, num_points)
+    
+    # Interpolate TPR at these points
+    mean_tpr = np.interp(mean_fpr, fpr, tpr)
+    
+    # Ensure start and end points
+    mean_tpr[0] = 0.0
+    mean_tpr[-1] = 1.0
+    
+    return mean_fpr, mean_tpr
+
+
 def compute_precision_recall(y_true, y_pred) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """
     Compute Precision-Recall curve and Average Precision.
@@ -142,7 +167,7 @@ def compute_classification_metrics(y_true, y_pred, threshold=0.5):
 
 def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
     """
-    Create an interactive ROC curve plot using Plotly.
+    Create an interactive ROC curve plot using Plotly with smooth interpolation.
     
     Args:
         fpr: False positive rates
@@ -155,16 +180,43 @@ def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
     """
     fig = go.Figure()
     
-    # ROC curve
-    fig.add_trace(go.Scatter(
-        x=fpr,
-        y=tpr,
-        mode='lines',
-        name=f'ROC Curve (AUC = {auc_score:.4f})',
-        line=dict(color='#1f77b4', width=3),
-        hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
-        showlegend=True
-    ))
+    # Determine if we should interpolate (for smoother curves with few points)
+    if len(fpr) < 50:
+        # Interpolate for smoother visualization
+        fpr_smooth, tpr_smooth = interpolate_roc_curve(fpr, tpr, num_points=200)
+        
+        # Plot original points as markers
+        fig.add_trace(go.Scatter(
+            x=fpr,
+            y=tpr,
+            mode='markers',
+            name='Actual Thresholds',
+            marker=dict(color='#1f77b4', size=8, symbol='circle'),
+            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
+            showlegend=True
+        ))
+        
+        # Plot smooth interpolated line
+        fig.add_trace(go.Scatter(
+            x=fpr_smooth,
+            y=tpr_smooth,
+            mode='lines',
+            name=f'ROC Curve (AUC = {auc_score:.4f})',
+            line=dict(color='#1f77b4', width=3),
+            hoverinfo='skip',
+            showlegend=True
+        ))
+    else:
+        # For larger datasets, just plot the curve directly
+        fig.add_trace(go.Scatter(
+            x=fpr,
+            y=tpr,
+            mode='lines',
+            name=f'ROC Curve (AUC = {auc_score:.4f})',
+            line=dict(color='#1f77b4', width=3),
+            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
+            showlegend=True
+        ))
     
     # Diagonal reference line (random classifier)
     fig.add_trace(go.Scatter(
@@ -368,7 +420,7 @@ def plot_confusion_matrix(cm, labels=['Negative', 'Positive'], title="Confusion 
 
 def compare_models_roc(results_dict):
     """
-    Compare multiple models on the same ROC plot.
+    Compare multiple models on the same ROC plot with smooth curves.
     
     Args:
         results_dict: Dictionary of {model_name: (fpr, tpr, auc_score)}
@@ -383,15 +435,43 @@ def compare_models_roc(results_dict):
     for idx, (model_name, (fpr, tpr, auc_score)) in enumerate(results_dict.items()):
         color = colors[idx % len(colors)]
         
-        fig.add_trace(go.Scatter(
-            x=fpr,
-            y=tpr,
-            mode='lines',
-            name=f'{model_name} (AUC = {auc_score:.4f})',
-            line=dict(color=color, width=2),
-            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
-            showlegend=True
-        ))
+        # Check if we should interpolate
+        if len(fpr) < 50:
+            # Interpolate for smoother curves
+            fpr_smooth, tpr_smooth = interpolate_roc_curve(fpr, tpr, num_points=200)
+            
+            # Plot smooth line
+            fig.add_trace(go.Scatter(
+                x=fpr_smooth,
+                y=tpr_smooth,
+                mode='lines',
+                name=f'{model_name} (AUC = {auc_score:.4f})',
+                line=dict(color=color, width=2),
+                hoverinfo='skip',
+                showlegend=True
+            ))
+            
+            # Add markers for actual points
+            fig.add_trace(go.Scatter(
+                x=fpr,
+                y=tpr,
+                mode='markers',
+                name=f'{model_name} Points',
+                marker=dict(color=color, size=6, symbol='circle'),
+                hovertemplate=f'{model_name}<br>FPR: %{{x:.4f}}<br>TPR: %{{y:.4f}}<extra></extra>',
+                showlegend=False
+            ))
+        else:
+            # Plot directly for larger datasets
+            fig.add_trace(go.Scatter(
+                x=fpr,
+                y=tpr,
+                mode='lines',
+                name=f'{model_name} (AUC = {auc_score:.4f})',
+                line=dict(color=color, width=2),
+                hovertemplate=f'{model_name}<br>FPR: %{{x:.4f}}<br>TPR: %{{y:.4f}}<extra></extra>',
+                showlegend=True
+            ))
     
     # Diagonal reference line
     fig.add_trace(go.Scatter(
