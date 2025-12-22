@@ -38,7 +38,7 @@ A professional, GPU-accelerated application for chest X-ray analysis using state
 ### One-Command Setup (Recommended)
 
 ```bash
-python install_pytorch.py
+python setup_script.py
 ```
 
 That's it! The script automatically:
@@ -231,7 +231,7 @@ High normal probability indicates the X-ray appears normal.
 **Issue: "python: command not found"**
 ```bash
 # Use python3 instead
-python3 install_pytorch.py
+python3 setup_script.py
 ```
 
 **Issue: PowerShell execution policy error**
@@ -294,7 +294,7 @@ xray-inference-tool/
 ├── utils.py                # Helper functions
 ├── metrics.py              # ROC/AUC calculations
 ├── config.py               # Configuration settings
-├── install_pytorch.py      # Automated setup script
+├── setup_script.py      # Automated setup script
 ├── requirements.txt        # Python dependencies
 ├── .gitignore              # Git ignore rules
 └── README.md               # This file
@@ -357,7 +357,7 @@ The underlying TorchXRayVision library and models have their own licenses - see 
 
 | Command | Purpose |
 |---------|---------|
-| `python install_pytorch.py` | Complete setup |
+| `python setup_script.py` | Complete setup |
 | `xray_env\Scripts\activate` | Activate (Windows) |
 | `source xray_env/bin/activate` | Activate (Linux/macOS) |
 | `streamlit run app.py` | Run the app |
