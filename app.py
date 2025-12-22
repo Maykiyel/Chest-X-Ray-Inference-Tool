@@ -35,15 +35,6 @@ if 'results_df' not in st.session_state:
     st.session_state.results_df = None
 if 'models_loaded' not in st.session_state:
     st.session_state.models_loaded = {}
-if 'selected_pathologies' not in st.session_state:
-    st.session_state.selected_pathologies = []
-
-# All available pathologies from the models
-ALL_PATHOLOGIES = [
-    'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
-    'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass', 'Nodule',
-    'Pleural_Thickening', 'Pneumonia', 'Pneumothorax', 'Normal'
-]
 
 # Title and description
 st.title("🫁 Chest X-Ray Inference Tool")
@@ -69,50 +60,16 @@ with st.sidebar:
     
     st.divider()
     
-    # Pathology selection
-    st.subheader("🎯 Select Pathologies to Prioritize")
-    st.caption("Select which pathologies you want to focus on. The models will still check for all pathologies, but only selected ones will be displayed in results.")
-    
-    # Quick select buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Select Common", width='stretch'):
-            st.session_state.selected_pathologies = [
-                'Atelectasis', 'Cardiomegaly', 'Effusion', 
-                'Edema', 'Pneumonia', 'Pneumothorax', 'Normal'
-            ]
-    with col2:
-        if st.button("Select All", width='stretch'):
-            st.session_state.selected_pathologies = ALL_PATHOLOGIES.copy()
-    
-    # Individual pathology checkboxes
-    selected_pathologies = st.multiselect(
-        "Choose pathologies:",
-        options=ALL_PATHOLOGIES,
-        default=st.session_state.selected_pathologies if st.session_state.selected_pathologies else [
-            'Atelectasis', 'Cardiomegaly', 'Effusion', 
-            'Edema', 'Pneumonia', 'Pneumothorax', 'Normal'
-        ],
-        help="Select the pathologies you want to analyze and display in results"
-    )
-    st.session_state.selected_pathologies = selected_pathologies
-    
-    if not selected_pathologies:
-        st.warning("⚠️ Please select at least one pathology")
-    else:
-        st.success(f"✓ {len(selected_pathologies)} pathologies selected")
-    
-    st.divider()
-    
     # Device selection
     st.subheader("Device Selection")
     
+    # Check available devices
     cuda_available = torch.cuda.is_available()
     
     if cuda_available:
         device_options = ['GPU (CUDA)', 'CPU']
         device_help = f"GPU: {torch.cuda.get_device_name(0)} | Switch to CPU to save GPU for other tasks"
-        default_device = 0
+        default_device = 0  # GPU by default
     else:
         device_options = ['CPU']
         device_help = "GPU not available. Install CUDA-enabled PyTorch for GPU support."
@@ -125,11 +82,15 @@ with st.sidebar:
         help=device_help
     )
     
+    # Convert selection to device string
     device = 'cuda' if selected_device == 'GPU (CUDA)' else 'cpu'
     
+    # Display device info
     if device == 'cuda':
         st.success(f"✅ Using: **GPU (CUDA)**")
         st.info(f"🎮 {torch.cuda.get_device_name(0)}")
+        
+        # Show VRAM info if available
         try:
             total_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             st.caption(f"💾 VRAM: {total_memory:.1f} GB")
@@ -145,6 +106,7 @@ with st.sidebar:
     # Batch settings
     st.subheader("Batch Processing")
     
+    # Recommend batch size based on device
     if device == 'cuda':
         recommended_batch = 16
         batch_help = "GPU Mode: Larger batches recommended (8-32). Faster processing with minimal memory overhead."
@@ -162,6 +124,7 @@ with st.sidebar:
         help=batch_help
     )
     
+    # Show performance estimate
     if device == 'cuda':
         est_time = "~0.5-2s per image"
         st.caption(f"⚡ Estimated speed: {est_time}")
@@ -179,31 +142,32 @@ with st.sidebar:
     
     **Features:**
     - Multi-model inference
-    - Custom pathology selection
     - Multiple image upload
     - Batch processing (150+ images)
     - CPU/GPU selection
+    - Normal X-ray detection
     - ROC/AUC analysis
     - CSV export
     
     **Tips:**
-    - Select pathologies before scanning
     - Use GPU for 10-30x speed boost
     - Upload multiple images at once
     - Organize folders by pathology
     """)
+    
+    # Show session info
+    with st.expander("📊 Session Info"):
+        st.write(f"**Device:** {device.upper()}")
+        st.write(f"**Batch Size:** {batch_size}")
+        st.write(f"**Models Selected:** {len(selected_models)}")
+        if st.session_state.results_df is not None:
+            st.write(f"**Results Loaded:** {len(st.session_state.results_df)} predictions")
 
 # Main content
 tab1, tab2, tab3 = st.tabs(["📁 Single/Batch Inference", "📊 Results & Analysis", "📈 ROC/AUC Curves"])
 
 with tab1:
     st.header("Upload Images")
-    
-    # Show selected pathologies
-    if selected_pathologies:
-        st.info(f"🎯 **Selected Pathologies:** {', '.join(selected_pathologies)}")
-    else:
-        st.warning("⚠️ Please select at least one pathology in the sidebar before scanning")
     
     col1, col2 = st.columns([1, 1])
     
@@ -216,7 +180,7 @@ with tab1:
             help="Select one or more images to analyze"
         )
         
-        if uploaded_files and selected_models and selected_pathologies:
+        if uploaded_files and selected_models:
             if st.button("🔍 Analyze Images", width='stretch'):
                 with st.spinner("Loading models..."):
                     models = load_models(selected_models, device)
@@ -231,6 +195,7 @@ with tab1:
                     
                     for idx, uploaded_file in enumerate(uploaded_files):
                         with st.spinner(f"Processing {uploaded_file.name}..."):
+                            # Save uploaded file temporarily
                             temp_path = Path(f"temp_{uploaded_file.name}")
                             with open(temp_path, "wb") as f:
                                 f.write(uploaded_file.getbuffer())
@@ -247,21 +212,23 @@ with tab1:
                                 except Exception as e:
                                     st.error(f"Error processing {uploaded_file.name} with {model_name}: {str(e)}")
                             
-                            temp_path.unlink()
+                            temp_path.unlink()  # Clean up
                         
+                        # Update progress
                         progress_bar.progress((idx + 1) / len(uploaded_files))
                     
                     if not results:
                         st.error("❌ No predictions were generated. Please check the error messages.")
                     else:
-                        # Filter to selected pathologies
+                        # Convert to DataFrame
                         df = pd.DataFrame(results)
-                        df = df[df['pathology'].isin(selected_pathologies)]
                         st.session_state.results_df = df
                         
                         st.success(f"✅ Analysis complete! Processed {len(uploaded_files)} image(s) with {len(models)} model(s).")
                         
+                        # Display results in a grid
                         if len(uploaded_files) == 1:
+                            # Single image - show side by side
                             col_img, col_pred = st.columns([1, 1])
                             with col_img:
                                 st.image(uploaded_files[0], caption="Uploaded X-ray", width='stretch')
@@ -275,18 +242,18 @@ with tab1:
                                         for _, row in model_results.iterrows():
                                             st.progress(row['probability'], text=f"{row['pathology']}: {row['probability']:.3f}")
                         else:
+                            # Multiple images - show summary
                             st.subheader("Processing Summary")
                             st.write(f"**Total Images:** {len(uploaded_files)}")
                             st.write(f"**Total Predictions:** {len(df)}")
                             st.write(f"**Models Used:** {', '.join([m.upper() for m in models.keys()])}")
                             
+                            # Show preview of results
                             st.subheader("Top 10 High-Risk Findings")
                             top_findings = df.nlargest(10, 'probability')[['filename', 'model', 'pathology', 'probability']]
                             st.dataframe(top_findings, width='stretch')
                             
                             st.info("👉 Go to the 'Results & Analysis' tab to see detailed results and visualizations.")
-        elif uploaded_files and not selected_pathologies:
-            st.warning("⚠️ Please select at least one pathology in the sidebar before analyzing")
     
     with col2:
         st.subheader("Batch Folder Processing")
@@ -298,7 +265,7 @@ with tab1:
         recursive_search = st.checkbox("Search subfolders recursively", value=True)
         auto_label = st.checkbox("Auto-detect labels from folder names", value=True)
         
-        if folder_path and selected_models and selected_pathologies:
+        if folder_path and selected_models:
             if st.button("🚀 Process Batch", width='stretch'):
                 folder = Path(folder_path)
                 
@@ -311,6 +278,7 @@ with tab1:
                     if not models:
                         st.error("❌ No models were successfully loaded. Please check the error messages above.")
                     else:
+                        # Get all image paths
                         image_paths = get_image_paths(folder, recursive=recursive_search)
                         
                         if not image_paths:
@@ -318,7 +286,9 @@ with tab1:
                         else:
                             st.info(f"📁 Found **{len(image_paths)}** images")
                             
+                            # Show folder statistics if auto-label is enabled
                             if auto_label:
+                                # Count images by folder
                                 folder_counts = {}
                                 for img_path in image_paths:
                                     folder_name = img_path.parent.name
@@ -329,10 +299,12 @@ with tab1:
                                     for folder_name, count in sorted(folder_counts.items()):
                                         st.write(f"  • {folder_name}: {count} images")
                             
-                            est_time_per_image = 3 if device == 'cuda' else 15
+                            # Estimate processing time
+                            est_time_per_image = 3 if device == 'cuda' else 15  # seconds
                             total_est_time = (len(image_paths) * len(models) * est_time_per_image) / batch_size
                             st.info(f"⏱️ Estimated time: ~{total_est_time/60:.1f} minutes")
                             
+                            # Process batch with progress bar
                             progress_bar = st.progress(0)
                             status_text = st.empty()
                             
@@ -367,11 +339,11 @@ with tab1:
                                 progress_bar.progress(1.0)
                                 status_text.text("✅ Processing complete!")
                                 
-                                # Filter to selected pathologies
+                                # Convert to DataFrame
                                 df = pd.DataFrame(all_results)
-                                df = df[df['pathology'].isin(selected_pathologies)]
                                 st.session_state.results_df = df
                                 
+                                # Show completion statistics
                                 col1, col2, col3, col4 = st.columns(4)
                                 with col1:
                                     st.metric("Images Processed", len(image_paths))
@@ -385,14 +357,18 @@ with tab1:
                                 
                                 st.success(f"✅ Successfully processed {len(image_paths)} images with {len(models)} model(s)!")
                                 st.balloons()
-        elif folder_path and not selected_pathologies:
-            st.warning("⚠️ Please select at least one pathology in the sidebar before processing")
 
 with tab2:
     st.header("Results & Analysis")
     
     if st.session_state.results_df is not None:
         df = st.session_state.results_df
+        
+        # Define priority pathologies
+        priority_pathologies = ['Atelectasis', 'Cardiomegaly', 'Effusion', 'Edema', 'Pneumonia', 'Pneumothorax']
+        
+        # Filter to priority pathologies
+        df = df[df['pathology'].isin(priority_pathologies + ['Normal'])]
         
         # Summary statistics
         col1, col2, col3, col4 = st.columns(4)
@@ -416,12 +392,13 @@ with tab2:
                 default=df['model'].unique()
             )
         with col2:
-            available_pathologies = sorted(df['pathology'].unique())
+            # Only show priority pathologies in filter
+            available_pathologies = sorted([p for p in df['pathology'].unique() if p in priority_pathologies + ['Normal']])
             selected_pathology_filter = st.multiselect(
                 "Filter by Pathology",
                 options=available_pathologies,
                 default=[],
-                help="Leave empty to show all selected pathologies"
+                help="Showing only: Atelectasis, Cardiomegaly, Effusion, Edema, Pneumonia, Pneumothorax"
             )
         with col3:
             min_prob = st.slider("Minimum Probability", 0.0, 1.0, 0.0, 0.05)
@@ -447,7 +424,7 @@ with tab2:
             data=csv,
             file_name=f"xray_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
-            width='stretch'
+            use_container_width=True
         )
         
         # Visualizations
@@ -457,6 +434,7 @@ with tab2:
         col1, col2 = st.columns(2)
         
         with col1:
+            # Top pathologies by average probability
             st.markdown("**Top Pathologies (Avg Probability)**")
             top_pathologies = filtered_df.groupby('pathology')['probability'].mean().nlargest(10)
             
@@ -475,6 +453,7 @@ with tab2:
             st.plotly_chart(fig, width='stretch')
         
         with col2:
+            # Model comparison
             st.markdown("**Model Comparison (Avg Probability)**")
             model_avg = filtered_df.groupby('model')['probability'].mean()
             
@@ -499,143 +478,157 @@ with tab3:
     if st.session_state.results_df is not None:
         df = st.session_state.results_df
         
-        if 'ground_truth' in df.columns and df['ground_truth'].notna().any():
+        # Define priority pathologies to show first
+        priority_pathologies = ['Atelectasis', 'Cardiomegaly', 'Effusion', 'Edema', 'Pneumonia', 'Pneumothorax']
+        
+        # Filter dataframe to only show priority pathologies
+        df_filtered = df[df['pathology'].isin(priority_pathologies)]
+        
+        # Check if we have ground truth labels
+        if 'ground_truth' in df_filtered.columns and df_filtered['ground_truth'].notna().any():
             st.info("Ground truth labels detected!")
             
+            # Get available pathologies (only those with ground truth data)
             available_pathologies = sorted([
-                p for p in df['pathology'].unique() 
-                if df[df['pathology'] == p]['ground_truth'].notna().any()
+                p for p in priority_pathologies 
+                if p in df_filtered['pathology'].unique() and 
+                df_filtered[df_filtered['pathology'] == p]['ground_truth'].notna().any()
             ])
             
             if not available_pathologies:
-                st.warning("⚠️ No pathologies found with ground truth labels.")
-            else:
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    model_options = ['All Models'] + list(df['model'].unique())
-                    selected_model_roc = st.selectbox(
-                        "Select Model",
-                        options=model_options,
-                        help="Select a specific model or 'All Models' to compare all models"
-                    )
-                
-                with col2:
-                    selected_pathology_roc = st.selectbox(
-                        "Select Pathology",
-                        options=available_pathologies
-                    )
-                
-                with col3:
-                    st.write("")
-                
-                if st.button("📈 Generate ROC Curve", width='stretch'):
-                    with st.spinner("Computing ROC/AUC..."):
+                st.warning("⚠️ No priority pathologies found with ground truth labels. Showing all available pathologies.")
+                available_pathologies = sorted(df['pathology'].unique())
+                df_filtered = df
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Add "All Models" option
+                model_options = ['All Models'] + list(df_filtered['model'].unique())
+                selected_model_roc = st.selectbox(
+                    "Select Model",
+                    options=model_options,
+                    help="Select a specific model or 'All Models' to compare all models"
+                )
+            
+            with col2:
+                selected_pathology_roc = st.selectbox(
+                    "Select Pathology",
+                    options=available_pathologies,
+                    help="Only showing: Atelectasis, Cardiomegaly, Effusion, Edema, Pneumonia, Pneumothorax"
+                )
+            
+            with col3:
+                st.write("")  # Spacer
+            
+            if st.button("📈 Generate ROC Curve", width='stretch'):
+                with st.spinner("Computing ROC/AUC..."):
+                    
+                    if selected_model_roc == 'All Models':
+                        # Compare all models for the selected pathology
+                        st.subheader(f"Model Comparison - {selected_pathology_roc}")
                         
-                        if selected_model_roc == 'All Models':
-                            st.subheader(f"Model Comparison - {selected_pathology_roc}")
-                            
-                            results_dict = {}
-                            models_with_data = []
-                            
-                            for model_name in df['model'].unique():
-                                roc_data = df[
-                                    (df['model'] == model_name) & 
-                                    (df['pathology'] == selected_pathology_roc) &
-                                    (df['ground_truth'].notna())
-                                ]
-                                
-                                if len(roc_data) >= 10:
-                                    try:
-                                        fpr, tpr, thresholds, auc_score = compute_roc_auc(
-                                            roc_data['ground_truth'].values,
-                                            roc_data['probability'].values
-                                        )
-                                        results_dict[model_name.upper()] = (fpr, tpr, auc_score)
-                                        models_with_data.append(model_name)
-                                    except Exception as e:
-                                        st.warning(f"Could not compute ROC for {model_name}: {str(e)}")
-                            
-                            if len(results_dict) == 0:
-                                st.error("❌ Not enough data for any model. Need at least 10 samples per model.")
-                            elif len(results_dict) == 1:
-                                st.info("ℹ️ Only one model has sufficient data. Showing single ROC curve.")
-                                model_name = list(results_dict.keys())[0]
-                                fpr, tpr, auc_score = results_dict[model_name]
-                                fig = plot_roc_curve(fpr, tpr, auc_score, f"{model_name} - {selected_pathology_roc}")
-                                st.plotly_chart(fig, width='stretch')
-                            else:
-                                from metrics import compare_models_roc
-                                fig = compare_models_roc(results_dict)
-                                st.plotly_chart(fig, width='stretch')
-                                
-                                st.subheader("Model Performance Summary")
-                                summary_data = []
-                                for model_name in models_with_data:
-                                    roc_data = df[
-                                        (df['model'] == model_name) & 
-                                        (df['pathology'] == selected_pathology_roc) &
-                                        (df['ground_truth'].notna())
-                                    ]
-                                    auc = results_dict[model_name.upper()][2]
-                                    summary_data.append({
-                                        'Model': model_name.upper(),
-                                        'AUC Score': f"{auc:.4f}",
-                                        'Data Points': len(roc_data),
-                                        'Positive Rate': f"{roc_data['ground_truth'].mean():.2%}"
-                                    })
-                                
-                                summary_df = pd.DataFrame(summary_data)
-                                st.dataframe(summary_df, width='stretch', hide_index=True)
+                        results_dict = {}
+                        models_with_data = []
                         
-                        else:
-                            roc_data = df[
-                                (df['model'] == selected_model_roc) & 
-                                (df['pathology'] == selected_pathology_roc) &
-                                (df['ground_truth'].notna())
+                        for model_name in df_filtered['model'].unique():
+                            roc_data = df_filtered[
+                                (df_filtered['model'] == model_name) & 
+                                (df_filtered['pathology'] == selected_pathology_roc) &
+                                (df_filtered['ground_truth'].notna())
                             ]
                             
-                            if len(roc_data) < 10:
-                                st.warning("⚠️ Not enough data points for ROC analysis (need at least 10)")
-                            else:
+                            if len(roc_data) >= 10:
                                 try:
                                     fpr, tpr, thresholds, auc_score = compute_roc_auc(
                                         roc_data['ground_truth'].values,
                                         roc_data['probability'].values
                                     )
-                                    
-                                    fig = plot_roc_curve(fpr, tpr, auc_score, 
-                                                       f"{selected_model_roc.upper()} - {selected_pathology_roc}")
-                                    
-                                    st.plotly_chart(fig, width='stretch')
-                                    
-                                    # Add explanation for small datasets
-                                    if len(roc_data) < 50:
-                                        st.info(f"""
-                                        ℹ️ **Note about curve smoothness:** The curve appears jagged because you have {len(roc_data)} data points. 
-                                        This is normal for small datasets. Each step represents a different threshold.
-                                        For smoother curves, process more images (50+ recommended).
-                                        """)
-                                    
-                                    col1, col2, col3 = st.columns(3)
-                                    with col1:
-                                        st.metric("AUC Score", f"{auc_score:.4f}")
-                                    with col2:
-                                        st.metric("Data Points", len(roc_data))
-                                    with col3:
-                                        positive_rate = roc_data['ground_truth'].mean()
-                                        st.metric("Positive Rate", f"{positive_rate:.2%}")
-                                    
+                                    results_dict[model_name.upper()] = (fpr, tpr, auc_score)
+                                    models_with_data.append(model_name)
                                 except Exception as e:
-                                    st.error(f"Error computing ROC: {str(e)}")
+                                    st.warning(f"Could not compute ROC for {model_name}: {str(e)}")
+                        
+                        if len(results_dict) == 0:
+                            st.error("❌ Not enough data for any model. Need at least 10 samples per model.")
+                        elif len(results_dict) == 1:
+                            st.info("ℹ️ Only one model has sufficient data. Showing single ROC curve.")
+                            model_name = list(results_dict.keys())[0]
+                            fpr, tpr, auc_score = results_dict[model_name]
+                            fig = plot_roc_curve(fpr, tpr, auc_score, f"{model_name} - {selected_pathology_roc}")
+                            st.plotly_chart(fig, width='stretch')
+                        else:
+                            # Import the comparison function
+                            from metrics import compare_models_roc
+                            fig = compare_models_roc(results_dict)
+                            st.plotly_chart(fig, width='stretch')
+                            
+                            # Show summary metrics
+                            st.subheader("Model Performance Summary")
+                            summary_data = []
+                            for model_name in models_with_data:
+                                roc_data = df_filtered[
+                                    (df_filtered['model'] == model_name) & 
+                                    (df_filtered['pathology'] == selected_pathology_roc) &
+                                    (df_filtered['ground_truth'].notna())
+                                ]
+                                auc = results_dict[model_name.upper()][2]
+                                summary_data.append({
+                                    'Model': model_name.upper(),
+                                    'AUC Score': f"{auc:.4f}",
+                                    'Data Points': len(roc_data),
+                                    'Positive Rate': f"{roc_data['ground_truth'].mean():.2%}"
+                                })
+                            
+                            summary_df = pd.DataFrame(summary_data)
+                            st.dataframe(summary_df, width='stretch', hide_index=True)
+                    
+                    else:
+                        # Single model ROC curve
+                        roc_data = df_filtered[
+                            (df_filtered['model'] == selected_model_roc) & 
+                            (df_filtered['pathology'] == selected_pathology_roc) &
+                            (df_filtered['ground_truth'].notna())
+                        ]
+                        
+                        if len(roc_data) < 10:
+                            st.warning("⚠️ Not enough data points for ROC analysis (need at least 10)")
+                        else:
+                            try:
+                                # Compute ROC
+                                fpr, tpr, thresholds, auc_score = compute_roc_auc(
+                                    roc_data['ground_truth'].values,
+                                    roc_data['probability'].values
+                                )
+                                
+                                # Plot
+                                fig = plot_roc_curve(fpr, tpr, auc_score, 
+                                                   f"{selected_model_roc.upper()} - {selected_pathology_roc}")
+                                
+                                st.plotly_chart(fig, width='stretch')
+                                
+                                # Metrics
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("AUC Score", f"{auc_score:.4f}")
+                                with col2:
+                                    st.metric("Data Points", len(roc_data))
+                                with col3:
+                                    positive_rate = roc_data['ground_truth'].mean()
+                                    st.metric("Positive Rate", f"{positive_rate:.2%}")
+                                
+                            except Exception as e:
+                                st.error(f"Error computing ROC: {str(e)}")
         else:
-            st.warning(f"""
+            st.warning("""
             ⚠️ No ground truth labels found in the data.
             
             To enable ROC/AUC analysis:
             1. Organize images in folders by label (e.g., `pneumonia_positive`, `pneumonia_negative`)
             2. Enable "Auto-detect labels from folder names" option
             3. Process the batch
+            
+            Supported pathologies: Atelectasis, Cardiomegaly, Effusion, Edema, Pneumonia, Pneumothorax
             
             Or provide a CSV with ground truth labels.
             """)
