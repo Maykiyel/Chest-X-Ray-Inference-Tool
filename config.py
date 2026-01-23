@@ -12,22 +12,22 @@ Modify these settings to customize the application behavior.
 MODELS_CONFIG = {
     'nih': {
         'name': 'NIH Model',
-        'description': 'DenseNet121 trained on NIH ChestX-ray14',
+        'description': 'DenseNet121 trained on NIH ChestX-ray8',
         'weights': 'densenet121-res224-nih',
         'input_size': 224,
         'enabled_by_default': True
     },
     'mimic': {
         'name': 'MIMIC Model',
-        'description': 'DenseNet121 trained on MIMIC-CXR',
+        'description': 'DenseNet121 trained on MIMIC-CXR (MIT)',
         'weights': 'densenet121-res224-mimic_nb',
         'input_size': 224,
         'enabled_by_default': True
     },
     'chexpert': {
         'name': 'CheXpert Model',
-        'description': 'DenseNet121 baseline for CheXpert',
-        'weights': 'densenet121-res224-chexpert',
+        'description': 'DenseNet121 trained on CheXpert (Stanford)',
+        'weights': 'densenet121-res224-chex',  # UPDATED
         'input_size': 224,
         'enabled_by_default': True
     }

@@ -74,6 +74,9 @@ python setup_script.py
 **1. Activate virtual environment:**
 
 ```bash
+# Git Bash CLI
+source xray_env/Scripts/activate
+
 # Windows - Command Prompt
 xray_env\Scripts\activate.bat
 

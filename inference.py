@@ -26,11 +26,14 @@ def load_models(model_names, device='cpu'):
     for name in model_names:
         try:
             if name == 'nih':
+                # NIH chest X-ray8
                 model = xrv.models.DenseNet(weights="densenet121-res224-nih")
             elif name == 'mimic':
+                # MIMIC-CXR (MIT)
                 model = xrv.models.DenseNet(weights="densenet121-res224-mimic_nb")
             elif name == 'chexpert':
-                model = xrv.models.DenseNet(weights="densenet121-res224-all")
+                # CheXpert (Stanford) - UPDATED
+                model = xrv.models.DenseNet(weights="densenet121-res224-chex")
             else:
                 continue
             
