@@ -62,14 +62,14 @@ def load_models(model_names, device='cpu'):
 def preprocess_image(img_path, target_size=224):
     """
     Preprocess image using OFFICIAL TorchXRayVision pipeline.
-    This ensures identical preprocessing to what the models were trained with.
+    Follows the exact same process as the official example.
     
     Args:
         img_path: Path to image file
         target_size: Target size for resizing (default 224)
     
     Returns:
-        Preprocessed image tensor
+        Preprocessed image tensor with shape [1, H, W] (no channel dimension)
     """
     # Use official XRV image loader - handles DICOM and regular images correctly
     img = xrv.utils.load_image(str(img_path))
@@ -83,7 +83,9 @@ def preprocess_image(img_path, target_size=224):
     
     img = transform(img)
     
-    # Convert to tensor (official way)
+    # Convert to tensor - EXACTLY as in official example
+    # Shape after transform: [H, W]
+    # Shape after unsqueeze: [1, H, W] (batch dimension only, NO channel dimension)
     img_tensor = torch.from_numpy(img).unsqueeze(0)
     
     return img_tensor
@@ -92,6 +94,7 @@ def preprocess_image(img_path, target_size=224):
 def predict_single_image(img_path, model, model_name, device='cpu'):
     """
     Run inference on a single image using OFFICIAL pipeline.
+    Follows the exact process from the official TorchXRayVision example.
     
     Args:
         img_path: Path to image
@@ -112,7 +115,7 @@ def predict_single_image(img_path, model, model_name, device='cpu'):
     if device == 'cuda':
         torch.cuda.empty_cache()
     
-    # Inference with no gradient (official way)
+    # Inference with no gradient - EXACTLY as in official example
     with torch.no_grad():
         # Run inference - returns RAW LOGITS
         outputs = model(img_tensor)
@@ -171,13 +174,16 @@ def predict_single_image(img_path, model, model_name, device='cpu'):
 
 
 class XRayDataset(Dataset):
-    """Custom dataset for batch processing using official preprocessing."""
+    """
+    Custom dataset for batch processing using official preprocessing.
+    Follows the exact same preprocessing as the official TorchXRayVision example.
+    """
     
     def __init__(self, image_paths, target_size=224):
         self.image_paths = image_paths
         self.target_size = target_size
         
-        # Official transforms
+        # Official transforms - EXACTLY as in official example
         self.transform = torchvision.transforms.Compose([
             xrv.datasets.XRayCenterCrop(),
             xrv.datasets.XRayResizer(target_size)
@@ -190,21 +196,27 @@ class XRayDataset(Dataset):
         img_path = self.image_paths[idx]
         
         try:
-            # Use official loader and transforms
+            # Use official loader and transforms - EXACTLY as in official example
             img = xrv.utils.load_image(str(img_path))
             img = self.transform(img)
-            img_tensor = torch.from_numpy(img).unsqueeze(0)
+            
+            # Convert to tensor - EXACTLY as in official example
+            # Shape after transform: [H, W]
+            # Only ONE unsqueeze (batch dim added by DataLoader)
+            img_tensor = torch.from_numpy(img)
             
             return img_tensor, str(img_path), True
         except Exception as e:
             print(f"Error loading {img_path}: {str(e)}")
-            return torch.zeros(1, self.target_size, self.target_size), str(img_path), False
+            # Return a valid tensor with correct shape [H, W]
+            return torch.zeros(self.target_size, self.target_size), str(img_path), False
 
 
 def predict_batch(image_paths, model, model_name, device='cpu', 
                  batch_size=8, auto_label=True, progress_callback=None):
     """
     Run batch inference using OFFICIAL pipeline.
+    Follows the exact process from the official TorchXRayVision example.
     
     Args:
         image_paths: List of image paths
@@ -253,7 +265,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
         valid_images = images[valid_indices].to(device)
         valid_paths = [paths[i] for i in valid_indices]
         
-        # Inference with no gradient
+        # Inference with no gradient - EXACTLY as in official example
         with torch.no_grad():
             # Clear cache
             if device == 'cuda':
