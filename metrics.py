@@ -1,235 +1,155 @@
 import numpy as np
-from sklearn.metrics import roc_curve, auc, roc_auc_score, confusion_matrix
-from sklearn.metrics import precision_recall_curve, average_precision_score
+from sklearn.metrics import confusion_matrix
 import plotly.graph_objects as go
-from typing import Tuple, Optional
+from typing import Dict, Tuple
 import pandas as pd
 
 
-def compute_roc_auc(y_true, y_pred) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+def compute_confusion_matrix_metrics(y_true, y_pred, threshold=0.5) -> Dict:
     """
-    Compute ROC curve and AUC score.
+    Compute confusion matrix and all related metrics.
     
     Args:
         y_true: Ground truth binary labels (0 or 1)
-        y_pred: Predicted probabilities
+        y_pred: Predicted probabilities (0.0 to 1.0)
+        threshold: Classification threshold (default 0.5)
     
     Returns:
-        Tuple of (fpr, tpr, thresholds, auc_score)
+        Dictionary with confusion matrix and metrics
     """
-    # Ensure inputs are numpy arrays
-    y_true = np.array(y_true)
+    # Convert to numpy arrays
+    y_true = np.array(y_true).astype(int)
     y_pred = np.array(y_pred)
     
-    # Compute ROC curve
-    fpr, tpr, thresholds = roc_curve(y_true, y_pred)
-    
-    # Compute AUC score
-    auc_score = roc_auc_score(y_true, y_pred)
-    
-    return fpr, tpr, thresholds, auc_score
-
-
-def interpolate_roc_curve(fpr, tpr, num_points=100):
-    """
-    Interpolate ROC curve for smoother visualization.
-    
-    Args:
-        fpr: False positive rates
-        tpr: True positive rates
-        num_points: Number of interpolation points
-    
-    Returns:
-        Tuple of (interpolated_fpr, interpolated_tpr)
-    """
-    # Create evenly spaced points
-    mean_fpr = np.linspace(0, 1, num_points)
-    
-    # Interpolate TPR at these points
-    mean_tpr = np.interp(mean_fpr, fpr, tpr)
-    
-    # Ensure start and end points
-    mean_tpr[0] = 0.0
-    mean_tpr[-1] = 1.0
-    
-    return mean_fpr, mean_tpr
-
-
-def compute_precision_recall(y_true, y_pred) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-    """
-    Compute Precision-Recall curve and Average Precision.
-    
-    Args:
-        y_true: Ground truth binary labels
-        y_pred: Predicted probabilities
-    
-    Returns:
-        Tuple of (precision, recall, thresholds, avg_precision)
-    """
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    
-    precision, recall, thresholds = precision_recall_curve(y_true, y_pred)
-    avg_precision = average_precision_score(y_true, y_pred)
-    
-    return precision, recall, thresholds, avg_precision
-
-
-def compute_optimal_threshold(fpr, tpr, thresholds) -> Tuple[float, float, float]:
-    """
-    Compute optimal threshold using Youden's J statistic.
-    
-    Args:
-        fpr: False positive rates
-        tpr: True positive rates
-        thresholds: Thresholds
-    
-    Returns:
-        Tuple of (optimal_threshold, optimal_tpr, optimal_fpr)
-    """
-    # Youden's J statistic
-    j_scores = tpr - fpr
-    optimal_idx = np.argmax(j_scores)
-    
-    optimal_threshold = thresholds[optimal_idx]
-    optimal_tpr = tpr[optimal_idx]
-    optimal_fpr = fpr[optimal_idx]
-    
-    return optimal_threshold, optimal_tpr, optimal_fpr
-
-
-def compute_confusion_matrix_at_threshold(y_true, y_pred, threshold=0.5):
-    """
-    Compute confusion matrix at a given threshold.
-    
-    Args:
-        y_true: Ground truth binary labels
-        y_pred: Predicted probabilities
-        threshold: Classification threshold
-    
-    Returns:
-        Confusion matrix as 2x2 numpy array [[TN, FP], [FN, TP]]
-    """
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    
+    # Apply threshold to get binary predictions
     y_pred_binary = (y_pred >= threshold).astype(int)
+    
+    # Compute confusion matrix
     cm = confusion_matrix(y_true, y_pred_binary)
     
-    return cm
-
-
-def compute_classification_metrics(y_true, y_pred, threshold=0.5):
-    """
-    Compute various classification metrics.
+    # Handle edge cases (e.g., all predictions are one class)
+    if cm.shape == (1, 1):
+        # Only one class present
+        if y_true[0] == 0:
+            tn, fp, fn, tp = cm[0, 0], 0, 0, 0
+        else:
+            tn, fp, fn, tp = 0, 0, 0, cm[0, 0]
+    else:
+        tn, fp, fn, tp = cm.ravel()
     
-    Args:
-        y_true: Ground truth binary labels
-        y_pred: Predicted probabilities
-        threshold: Classification threshold
+    # Calculate metrics
+    total = tn + fp + fn + tp
     
-    Returns:
-        Dictionary with metrics
-    """
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
+    # Sensitivity (Recall, True Positive Rate)
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     
-    y_pred_binary = (y_pred >= threshold).astype(int)
+    # Specificity (True Negative Rate)
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
     
-    # Confusion matrix
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred_binary).ravel()
+    # Precision (Positive Predictive Value)
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     
-    # Compute metrics
-    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
-    f1_score = 2 * (precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) > 0 else 0
+    # Negative Predictive Value
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
     
-    npv = tn / (tn + fn) if (tn + fn) > 0 else 0  # Negative predictive value
+    # Accuracy
+    accuracy = (tp + tn) / total if total > 0 else 0.0
     
-    metrics = {
-        'threshold': threshold,
-        'sensitivity': sensitivity,
-        'specificity': specificity,
-        'precision': precision,
-        'npv': npv,
-        'accuracy': accuracy,
-        'f1_score': f1_score,
+    # F1 Score
+    f1_score = 2 * (precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) > 0 else 0.0
+    
+    # False Positive Rate
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    
+    # False Negative Rate
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+    
+    return {
+        'confusion_matrix': cm,
         'true_positives': int(tp),
         'true_negatives': int(tn),
         'false_positives': int(fp),
-        'false_negatives': int(fn)
+        'false_negatives': int(fn),
+        'total': int(total),
+        'sensitivity': float(sensitivity),
+        'specificity': float(specificity),
+        'precision': float(precision),
+        'npv': float(npv),
+        'accuracy': float(accuracy),
+        'f1_score': float(f1_score),
+        'fpr': float(fpr),
+        'fnr': float(fnr),
+        'threshold': float(threshold)
     }
-    
-    return metrics
 
 
-def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
+def plot_confusion_matrix_heatmap(cm, title="Confusion Matrix", labels=['Negative', 'Positive']):
     """
-    Create an interactive ROC curve plot using Plotly with smooth interpolation.
+    Create an interactive confusion matrix heatmap using Plotly.
     
     Args:
-        fpr: False positive rates
-        tpr: True positive rates
-        auc_score: AUC score
+        cm: Confusion matrix (2x2 numpy array)
         title: Plot title
+        labels: Class labels
     
     Returns:
         Plotly figure object
     """
-    fig = go.Figure()
+    # Normalize for percentages
+    cm_sum = cm.sum()
+    cm_normalized = cm.astype('float') / cm_sum if cm_sum > 0 else cm
     
-    # Determine if we should interpolate (for smoother curves with few points)
-    if len(fpr) < 50:
-        # Interpolate for smoother visualization
-        fpr_smooth, tpr_smooth = interpolate_roc_curve(fpr, tpr, num_points=200)
-        
-        # Plot original points as markers
-        fig.add_trace(go.Scatter(
-            x=fpr,
-            y=tpr,
-            mode='markers',
-            name='Actual Thresholds',
-            marker=dict(color='#1f77b4', size=8, symbol='circle'),
-            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
-            showlegend=True
-        ))
-        
-        # Plot smooth interpolated line
-        fig.add_trace(go.Scatter(
-            x=fpr_smooth,
-            y=tpr_smooth,
-            mode='lines',
-            name=f'ROC Curve (AUC = {auc_score:.4f})',
-            line=dict(color='#1f77b4', width=3),
-            hoverinfo='skip',
-            showlegend=True
-        ))
+    # Create text annotations
+    annotations = []
+    
+    # Handle different matrix shapes
+    if cm.shape == (2, 2):
+        for i in range(2):
+            for j in range(2):
+                count = cm[i, j]
+                percentage = cm_normalized[i, j] * 100
+                annotations.append(
+                    dict(
+                        x=j,
+                        y=i,
+                        text=f'<b>{count}</b><br>({percentage:.1f}%)',
+                        font=dict(
+                            size=16, 
+                            color='white' if cm_normalized[i, j] > 0.5 else '#333'
+                        ),
+                        showarrow=False
+                    )
+                )
     else:
-        # For larger datasets, just plot the curve directly
-        fig.add_trace(go.Scatter(
-            x=fpr,
-            y=tpr,
-            mode='lines',
-            name=f'ROC Curve (AUC = {auc_score:.4f})',
-            line=dict(color='#1f77b4', width=3),
-            hovertemplate='FPR: %{x:.4f}<br>TPR: %{y:.4f}<extra></extra>',
-            showlegend=True
-        ))
+        # Single class case
+        annotations.append(
+            dict(
+                x=0,
+                y=0,
+                text=f'<b>{cm[0, 0]}</b><br>(100%)',
+                font=dict(size=16, color='#333'),
+                showarrow=False
+            )
+        )
     
-    # Diagonal reference line (random classifier)
-    fig.add_trace(go.Scatter(
-        x=[0, 1],
-        y=[0, 1],
-        mode='lines',
-        name='Random Classifier',
-        line=dict(color='gray', width=2, dash='dash'),
-        hoverinfo='skip',
-        showlegend=True
+    # Create heatmap
+    fig = go.Figure(data=go.Heatmap(
+        z=cm,
+        x=labels,
+        y=labels,
+        colorscale='Blues',
+        showscale=True,
+        hovertemplate='Predicted: %{x}<br>Actual: %{y}<br>Count: %{z}<extra></extra>',
+        colorbar=dict(
+            title="Count",
+            titleside="right",
+            tickmode="linear",
+            tick0=0,
+            dtick=max(1, cm.max() // 5)
+        )
     ))
     
-    # Layout
+    # Update layout
     fig.update_layout(
         title={
             'text': title,
@@ -237,97 +157,108 @@ def plot_roc_curve(fpr, tpr, auc_score, title="ROC Curve"):
             'xanchor': 'center',
             'font': {'size': 18, 'color': '#333'}
         },
-        xaxis_title='False Positive Rate (1 - Specificity)',
-        yaxis_title='True Positive Rate (Sensitivity)',
         xaxis=dict(
-            range=[0, 1], 
-            gridcolor='#e0e0e0',
-            showgrid=True,
-            zeroline=True,
-            zerolinecolor='#999',
-            zerolinewidth=1,
-            title_font=dict(size=14, color='#333'), 
-            tickfont=dict(size=12, color='#333')    
+            title='Predicted Label',
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333'),
+            side='bottom'
         ),
         yaxis=dict(
-            range=[0, 1], 
-            gridcolor='#e0e0e0',
-            showgrid=True,
-            zeroline=True,
-            zerolinecolor='#999',
-            zerolinewidth=1,
-            title_font=dict(size=14, color='#333'), 
-            tickfont=dict(size=12, color='#333')    
+            title='True Label',
+            title_font=dict(size=14, color='#333'),
+            tickfont=dict(size=12, color='#333'),
+            autorange='reversed'
         ),
-        width=None,  
+        width=600,
         height=500,
-        showlegend=True,
-        legend=dict(
-            x=0.98,
-            y=0.02,
-            xanchor='right',
-            yanchor='bottom',
-            bgcolor='rgba(255, 255, 255, 0.95)',
-            bordercolor='#ccc',
-            borderwidth=1,
-            font=dict(size=12, color='#333') 
-        ),
+        annotations=annotations,
         plot_bgcolor='white',
         paper_bgcolor='white',
-        hovermode='closest',
-        margin=dict(l=60, r=20, t=60, b=60)
+        margin=dict(l=80, r=80, t=80, b=80)
     )
     
     return fig
 
 
-def plot_precision_recall_curve(precision, recall, avg_precision, title="Precision-Recall Curve"):
+def compare_thresholds(y_true, y_pred, thresholds=None) -> pd.DataFrame:
     """
-    Create an interactive Precision-Recall curve plot.
+    Compare metrics across different classification thresholds.
     
     Args:
-        precision: Precision values
-        recall: Recall values
-        avg_precision: Average precision score
-        title: Plot title
+        y_true: Ground truth binary labels
+        y_pred: Predicted probabilities
+        thresholds: List of thresholds to test (default: 0.1 to 0.9 in 0.1 steps)
+    
+    Returns:
+        DataFrame with metrics for each threshold
+    """
+    if thresholds is None:
+        thresholds = np.arange(0.1, 1.0, 0.1)
+    
+    results = []
+    
+    for threshold in thresholds:
+        metrics = compute_confusion_matrix_metrics(y_true, y_pred, threshold)
+        results.append({
+            'threshold': threshold,
+            'accuracy': metrics['accuracy'],
+            'sensitivity': metrics['sensitivity'],
+            'specificity': metrics['specificity'],
+            'precision': metrics['precision'],
+            'f1_score': metrics['f1_score']
+        })
+    
+    return pd.DataFrame(results)
+
+
+def plot_threshold_comparison(y_true, y_pred):
+    """
+    Plot how metrics change with different thresholds.
+    
+    Args:
+        y_true: Ground truth binary labels
+        y_pred: Predicted probabilities
     
     Returns:
         Plotly figure object
     """
+    thresholds = np.arange(0.05, 0.96, 0.05)
+    df = compare_thresholds(y_true, y_pred, thresholds)
+    
     fig = go.Figure()
     
-    # PR curve
-    fig.add_trace(go.Scatter(
-        x=recall,
-        y=precision,
-        mode='lines',
-        name=f'PR Curve (AP = {avg_precision:.4f})',
-        line=dict(color='#2ca02c', width=3),
-        hovertemplate='Recall: %{x:.4f}<br>Precision: %{y:.4f}<extra></extra>',
-        showlegend=True
-    ))
+    # Add traces for each metric
+    metrics_to_plot = ['accuracy', 'sensitivity', 'specificity', 'precision', 'f1_score']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
     
-    # Layout
+    for metric, color in zip(metrics_to_plot, colors):
+        fig.add_trace(go.Scatter(
+            x=df['threshold'],
+            y=df[metric],
+            mode='lines+markers',
+            name=metric.replace('_', ' ').title(),
+            line=dict(color=color, width=2),
+            marker=dict(size=6)
+        ))
+    
     fig.update_layout(
         title={
-            'text': title,
+            'text': 'Metrics vs Classification Threshold',
             'x': 0.5,
             'xanchor': 'center',
             'font': {'size': 18, 'color': '#333'}
         },
-        xaxis_title='Recall (Sensitivity)',
-        yaxis_title='Precision',
         xaxis=dict(
-            range=[0, 1], 
+            title='Threshold',
+            range=[0, 1],
             gridcolor='#e0e0e0',
-            showgrid=True,
             title_font=dict(size=14, color='#333'),
             tickfont=dict(size=12, color='#333')
         ),
         yaxis=dict(
-            range=[0, 1], 
+            title='Metric Value',
+            range=[0, 1],
             gridcolor='#e0e0e0',
-            showgrid=True,
             title_font=dict(size=14, color='#333'),
             tickfont=dict(size=12, color='#333')
         ),
@@ -342,188 +273,94 @@ def plot_precision_recall_curve(precision, recall, avg_precision, title="Precisi
             bgcolor='rgba(255, 255, 255, 0.95)',
             bordercolor='#ccc',
             borderwidth=1,
-            font=dict(size=12, color='#333') 
-        ),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        hovermode='closest',
-        margin=dict(l=60, r=20, t=60, b=60)
-    )
-    
-    return fig
-
-
-def plot_confusion_matrix(cm, labels=['Negative', 'Positive'], title="Confusion Matrix"):
-    """
-    Create an interactive confusion matrix heatmap.
-    
-    Args:
-        cm: Confusion matrix (2x2 numpy array)
-        labels: Class labels
-        title: Plot title
-    
-    Returns:
-        Plotly figure object
-    """
-    # Normalize confusion matrix
-    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-    
-    # Create annotations
-    annotations = []
-    for i in range(len(labels)):
-        for j in range(len(labels)):
-            annotations.append(
-                dict(
-                    x=j,
-                    y=i,
-                    text=f'{cm[i, j]}<br>({cm_normalized[i, j]:.2%})',
-                    font=dict(size=14, color='white' if cm_normalized[i, j] > 0.5 else 'black'),
-                    showarrow=False
-                )
-            )
-    
-    fig = go.Figure(data=go.Heatmap(
-        z=cm,
-        x=labels,
-        y=labels,
-        colorscale='Blues',
-        showscale=True,
-        hovertemplate='Predicted: %{x}<br>Actual: %{y}<br>Count: %{z}<extra></extra>'
-    ))
-    
-    fig.update_layout(
-        title={
-            'text': title,
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 18, 'color': '#333'}
-        },
-        xaxis_title='Predicted Label',
-        yaxis_title='True Label',
-        xaxis=dict(
-            title_font=dict(size=14, color='#333'),
-            tickfont=dict(size=12, color='#333')
-        ),
-        yaxis=dict(
-            title_font=dict(size=14, color='#333'),
-            tickfont=dict(size=12, color='#333')
-        ),
-        width=None,
-        height=500,
-        annotations=annotations,
-        plot_bgcolor='white',
-        paper_bgcolor='white'
-    )
-    
-    return fig
-
-
-def compare_models_roc(results_dict):
-    """
-    Compare multiple models on the same ROC plot with smooth curves.
-    
-    Args:
-        results_dict: Dictionary of {model_name: (fpr, tpr, auc_score)}
-    
-    Returns:
-        Plotly figure object
-    """
-    fig = go.Figure()
-    
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-    
-    for idx, (model_name, (fpr, tpr, auc_score)) in enumerate(results_dict.items()):
-        color = colors[idx % len(colors)]
-        
-        # Check if we should interpolate
-        if len(fpr) < 50:
-            # Interpolate for smoother curves
-            fpr_smooth, tpr_smooth = interpolate_roc_curve(fpr, tpr, num_points=200)
-            
-            # Plot smooth line
-            fig.add_trace(go.Scatter(
-                x=fpr_smooth,
-                y=tpr_smooth,
-                mode='lines',
-                name=f'{model_name} (AUC = {auc_score:.4f})',
-                line=dict(color=color, width=2),
-                hoverinfo='skip',
-                showlegend=True
-            ))
-            
-            # Add markers for actual points
-            fig.add_trace(go.Scatter(
-                x=fpr,
-                y=tpr,
-                mode='markers',
-                name=f'{model_name} Points',
-                marker=dict(color=color, size=6, symbol='circle'),
-                hovertemplate=f'{model_name}<br>FPR: %{{x:.4f}}<br>TPR: %{{y:.4f}}<extra></extra>',
-                showlegend=False
-            ))
-        else:
-            # Plot directly for larger datasets
-            fig.add_trace(go.Scatter(
-                x=fpr,
-                y=tpr,
-                mode='lines',
-                name=f'{model_name} (AUC = {auc_score:.4f})',
-                line=dict(color=color, width=2),
-                hovertemplate=f'{model_name}<br>FPR: %{{x:.4f}}<br>TPR: %{{y:.4f}}<extra></extra>',
-                showlegend=True
-            ))
-    
-    # Diagonal reference line
-    fig.add_trace(go.Scatter(
-        x=[0, 1],
-        y=[0, 1],
-        mode='lines',
-        name='Random',
-        line=dict(color='gray', width=2, dash='dash'),
-        hoverinfo='skip',
-        showlegend=True
-    ))
-    
-    fig.update_layout(
-        title={
-            'text': 'Model Comparison - ROC Curves',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 18, 'color': '#333'}
-        },
-        xaxis_title='False Positive Rate',
-        yaxis_title='True Positive Rate',
-        xaxis=dict(
-            range=[0, 1],
-            gridcolor='#e0e0e0',
-            showgrid=True,
-            title_font=dict(size=14, color='#333'),
-            tickfont=dict(size=12, color='#333')
-        ),
-        yaxis=dict(
-            range=[0, 1],
-            gridcolor='#e0e0e0',
-            showgrid=True,
-            title_font=dict(size=14, color='#333'),
-            tickfont=dict(size=12, color='#333')
-        ),
-        width=None,
-        height=600,
-        showlegend=True,
-        legend=dict(
-            x=0.98,
-            y=0.02,
-            xanchor='right',
-            yanchor='bottom',
-            bgcolor='rgba(255, 255, 255, 0.95)',
-            bordercolor='#ccc',
-            borderwidth=1,
             font=dict(size=11, color='#333')
         ),
         plot_bgcolor='white',
         paper_bgcolor='white',
-        hovermode='closest',
+        hovermode='x unified',
         margin=dict(l=60, r=20, t=60, b=60)
     )
     
     return fig
+
+
+def find_optimal_threshold(y_true, y_pred, method='youden') -> Tuple[float, Dict]:
+    """
+    Find optimal classification threshold.
+    
+    Args:
+        y_true: Ground truth binary labels
+        y_pred: Predicted probabilities
+        method: Method to use ('youden', 'f1', 'accuracy')
+    
+    Returns:
+        Tuple of (optimal_threshold, metrics_at_threshold)
+    """
+    thresholds = np.arange(0.01, 1.0, 0.01)
+    best_score = -1
+    optimal_threshold = 0.5
+    
+    for threshold in thresholds:
+        metrics = compute_confusion_matrix_metrics(y_true, y_pred, threshold)
+        
+        if method == 'youden':
+            # Youden's J statistic: sensitivity + specificity - 1
+            score = metrics['sensitivity'] + metrics['specificity'] - 1
+        elif method == 'f1':
+            score = metrics['f1_score']
+        elif method == 'accuracy':
+            score = metrics['accuracy']
+        else:
+            raise ValueError(f"Unknown method: {method}")
+        
+        if score > best_score:
+            best_score = score
+            optimal_threshold = threshold
+    
+    # Get final metrics at optimal threshold
+    final_metrics = compute_confusion_matrix_metrics(y_true, y_pred, optimal_threshold)
+    
+    return optimal_threshold, final_metrics
+
+
+def compute_classification_report(y_true, y_pred, threshold=0.5) -> str:
+    """
+    Generate a text classification report.
+    
+    Args:
+        y_true: Ground truth binary labels
+        y_pred: Predicted probabilities
+        threshold: Classification threshold
+    
+    Returns:
+        Formatted string report
+    """
+    metrics = compute_confusion_matrix_metrics(y_true, y_pred, threshold)
+    
+    report = []
+    report.append("=" * 60)
+    report.append("CLASSIFICATION REPORT")
+    report.append("=" * 60)
+    report.append(f"\nThreshold: {threshold:.3f}")
+    report.append(f"Total Samples: {metrics['total']}")
+    report.append("\n" + "-" * 60)
+    report.append("CONFUSION MATRIX")
+    report.append("-" * 60)
+    report.append(f"True Positives:  {metrics['true_positives']:>5}")
+    report.append(f"True Negatives:  {metrics['true_negatives']:>5}")
+    report.append(f"False Positives: {metrics['false_positives']:>5}")
+    report.append(f"False Negatives: {metrics['false_negatives']:>5}")
+    report.append("\n" + "-" * 60)
+    report.append("PERFORMANCE METRICS")
+    report.append("-" * 60)
+    report.append(f"Accuracy:    {metrics['accuracy']:.4f}")
+    report.append(f"Sensitivity: {metrics['sensitivity']:.4f}  (True Positive Rate)")
+    report.append(f"Specificity: {metrics['specificity']:.4f}  (True Negative Rate)")
+    report.append(f"Precision:   {metrics['precision']:.4f}  (Positive Predictive Value)")
+    report.append(f"NPV:         {metrics['npv']:.4f}  (Negative Predictive Value)")
+    report.append(f"F1 Score:    {metrics['f1_score']:.4f}")
+    report.append(f"FPR:         {metrics['fpr']:.4f}  (False Positive Rate)")
+    report.append(f"FNR:         {metrics['fnr']:.4f}  (False Negative Rate)")
+    report.append("=" * 60)
+    
+    return "\n".join(report)

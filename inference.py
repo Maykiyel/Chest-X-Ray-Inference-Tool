@@ -9,10 +9,10 @@ import skimage
 from torch.utils.data import Dataset, DataLoader
 from utils import extract_folder_label
 
-@st.cache_resource
 def load_models(model_names, device='cpu'):
     """
-    Load and cache TorchXRayVision models.
+    Load TorchXRayVision models WITHOUT caching.
+    This ensures fresh predictions each time.
     
     Args:
         model_names: List of model names ('nih', 'mimic', 'chexpert')
@@ -26,26 +26,26 @@ def load_models(model_names, device='cpu'):
     for name in model_names:
         try:
             if name == 'nih':
-                # NIH chest X-ray8
                 model = xrv.models.DenseNet(weights="densenet121-res224-nih")
             elif name == 'mimic':
-                # MIMIC-CXR (MIT)
                 model = xrv.models.DenseNet(weights="densenet121-res224-mimic_nb")
             elif name == 'chexpert':
-                # CheXpert (Stanford) - UPDATED
                 model = xrv.models.DenseNet(weights="densenet121-res224-chex")
             else:
                 continue
             
             model = model.to(device)
             model.eval()
+            
+            # Important: Disable gradient computation
+            for param in model.parameters():
+                param.requires_grad = False
+            
             models[name] = model
             st.success(f"✓ Loaded {name.upper()} model")
             
         except Exception as e:
             st.error(f"Failed to load {name} model: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
     
     return models
 
@@ -53,6 +53,7 @@ def load_models(model_names, device='cpu'):
 def preprocess_image(img_path, target_size=224):
     """
     Preprocess image for TorchXRayVision models.
+    Creates a NEW tensor each time to avoid caching issues.
     
     Args:
         img_path: Path to image file
@@ -66,15 +67,10 @@ def preprocess_image(img_path, target_size=224):
     
     # Handle different image formats
     if len(img.shape) == 3:
-        # If image has 4 channels (RGBA), convert to RGB first
         if img.shape[2] == 4:
-            # Drop alpha channel
             img = img[:, :, :3]
-        
-        # Convert RGB to grayscale
         img = skimage.color.rgb2gray(img)
     elif len(img.shape) == 2:
-        # Already grayscale
         pass
     else:
         raise ValueError(f"Unexpected image shape: {img.shape}")
@@ -90,15 +86,18 @@ def preprocess_image(img_path, target_size=224):
     # Normalize using dataset statistics
     img = (img - 0.5) / 0.5
     
-    # Add channel dimension and convert to tensor
-    img = torch.from_numpy(img).unsqueeze(0)  # [1, H, W]
+    # IMPORTANT: Create new array to avoid reference issues
+    img = np.array(img, dtype=np.float32)
     
-    return img
+    # Convert to tensor - create NEW tensor
+    img_tensor = torch.from_numpy(img).unsqueeze(0).clone()
+    
+    return img_tensor
 
 
 def predict_single_image(img_path, model, model_name, device='cpu'):
     """
-    Run inference on a single image.
+    Run inference on a single image with NO caching.
     
     Args:
         img_path: Path to image
@@ -109,15 +108,28 @@ def predict_single_image(img_path, model, model_name, device='cpu'):
     Returns:
         List of prediction dictionaries
     """
-    # Preprocess
+    # Preprocess - creates NEW tensor each time
     img_tensor = preprocess_image(img_path).to(device)
     
-    # Inference
-    with torch.no_grad():
-        outputs = model(img_tensor)
+    # Ensure model is in eval mode
+    model.eval()
     
-    # Get predictions
-    predictions = torch.sigmoid(outputs).cpu().numpy()[0]
+    # Inference with no gradient
+    with torch.no_grad():
+        # Clear any previous computations
+        if device == 'cuda':
+            torch.cuda.empty_cache()
+        
+        # Run inference
+        outputs = model(img_tensor)
+        
+        # Apply sigmoid and move to CPU immediately
+        predictions = torch.sigmoid(outputs).cpu().numpy()[0].copy()
+    
+    # Clear GPU memory
+    del img_tensor, outputs
+    if device == 'cuda':
+        torch.cuda.empty_cache()
     
     # Format results
     results = []
@@ -130,7 +142,7 @@ def predict_single_image(img_path, model, model_name, device='cpu'):
             'filepath': str(img_path),
             'model': model_name,
             'pathology': pathology,
-            'probability': float(prob),
+            'probability': float(prob),  # Explicit conversion
             'timestamp': datetime.now().isoformat()
         })
     
@@ -151,7 +163,7 @@ def predict_single_image(img_path, model, model_name, device='cpu'):
 
 
 class XRayDataset(Dataset):
-    """Custom dataset for batch processing of X-ray images."""
+    """Custom dataset for batch processing - creates NEW tensors each time."""
     
     def __init__(self, image_paths, target_size=224):
         self.image_paths = image_paths
@@ -164,20 +176,19 @@ class XRayDataset(Dataset):
         img_path = self.image_paths[idx]
         
         try:
+            # Create NEW tensor each time
             img_tensor = preprocess_image(img_path, self.target_size)
-            # Don't squeeze - keep shape as [1, H, W] for proper batching
             return img_tensor, str(img_path), True
         except Exception as e:
-            # Log the error for debugging
             print(f"Error loading {img_path}: {str(e)}")
-            # Return dummy data with correct shape [1, H, W]
+            # Return dummy with correct shape
             return torch.zeros(1, self.target_size, self.target_size), str(img_path), False
 
 
 def predict_batch(image_paths, model, model_name, device='cpu', 
                  batch_size=8, auto_label=True, progress_callback=None):
     """
-    Run batch inference on multiple images.
+    Run batch inference with NO caching issues.
     
     Args:
         image_paths: List of image paths
@@ -191,6 +202,9 @@ def predict_batch(image_paths, model, model_name, device='cpu',
     Returns:
         List of prediction dictionaries
     """
+    # Ensure model is in eval mode
+    model.eval()
+    
     # Create dataset and dataloader
     dataset = XRayDataset(image_paths)
     dataloader = DataLoader(
@@ -215,10 +229,21 @@ def predict_batch(image_paths, model, model_name, device='cpu',
         valid_images = images[valid_indices].to(device)
         valid_paths = [paths[i] for i in valid_indices]
         
-        # Inference
+        # Inference with no gradient
         with torch.no_grad():
+            # Clear cache before inference
+            if device == 'cuda':
+                torch.cuda.empty_cache()
+            
             outputs = model(valid_images)
-            predictions = torch.sigmoid(outputs).cpu().numpy()
+            
+            # Apply sigmoid and move to CPU immediately
+            predictions = torch.sigmoid(outputs).cpu().numpy().copy()
+        
+        # Clear GPU memory after batch
+        del valid_images, outputs
+        if device == 'cuda':
+            torch.cuda.empty_cache()
         
         # Process predictions
         pathology_names = model.pathologies
@@ -238,7 +263,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
                     'filepath': str(img_path),
                     'model': model_name,
                     'pathology': pathology,
-                    'probability': float(prob),
+                    'probability': float(prob),  # Explicit conversion
                     'timestamp': datetime.now().isoformat()
                 }
                 
@@ -264,10 +289,6 @@ def predict_batch(image_paths, model, model_name, device='cpu',
                 normal_dict['ground_truth'] = ground_truth.get('Normal', 0)
             
             results.append(normal_dict)
-        
-        # Clear CUDA cache periodically to prevent memory buildup
-        if device == 'cuda' and batch_idx % 10 == 0:
-            torch.cuda.empty_cache()
         
         # Update progress
         if progress_callback:
