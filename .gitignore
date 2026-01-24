@@ -111,18 +111,18 @@ site/
 *.manifest
 *.spec
 
-# Data directories (uncomment if you don't want to commit datasets)
-# data/
-# dataset/
-# images/
-# xrays/
-# samples/
+# Data directories
+data/
+dataset/
+images/
+xrays/
+samples/
 
 # Large files (optional - uncomment if needed)
-# *.zip
-# *.tar.gz
-# *.rar
-# *.7z
+*.zip
+*.tar.gz
+*.rar
+*.7z
 
 # Backup files
 *.bak

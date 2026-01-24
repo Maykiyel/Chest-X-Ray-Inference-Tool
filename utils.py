@@ -30,16 +30,68 @@ def get_image_paths(folder_path: Path, recursive: bool = True) -> List[Path]:
     return sorted(image_paths)
 
 
-def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
+def extract_pathology_from_filename(filename: str) -> Optional[str]:
     """
-    Extract ground truth label from folder name.
+    Extract pathology name from filename.
     
     Supports patterns like:
-    - pneumonia_positive / pneumonia_negative
-    - Pneumonia_1 / Pneumonia_0
-    - positive_pneumonia / negative_pneumonia
-    - pneumonia/positive, pneumonia/negative
-    - normal / Normal (for normal X-rays)
+    - Pneumonia_img1.png
+    - Effusion_img23.png
+    - Atelectasis_img456.png
+    
+    Args:
+        filename: Filename to parse
+    
+    Returns:
+        Pathology name (capitalized) or None
+    """
+    # Common pathology names
+    pathologies = [
+        'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema',
+        'Effusion', 'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration',
+        'Mass', 'Nodule', 'Pleural_Thickening', 'Pneumonia', 
+        'Pneumothorax', 'Normal', 'Covid', 'Fracture'
+    ]
+    
+    # Try exact match first (case-insensitive)
+    filename_lower = filename.lower()
+    for pathology in pathologies:
+        if filename_lower.startswith(pathology.lower() + '_'):
+            return pathology
+    
+    # Try pattern matching: Pathology_imgN
+    match = re.match(r'^([A-Za-z_]+)_img\d+', filename, re.IGNORECASE)
+    if match:
+        potential_pathology = match.group(1)
+        # Check if it matches a known pathology
+        for pathology in pathologies:
+            if potential_pathology.lower() == pathology.lower():
+                return pathology
+            # Handle underscores (e.g., Pleural_Thickening)
+            if potential_pathology.lower().replace('_', '') == pathology.lower().replace('_', ''):
+                return pathology
+    
+    return None
+
+
+def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
+    """
+    Extract ground truth label from BOTH folder name AND filename.
+    
+    Supports multiple labeling methods:
+    
+    FILENAME-BASED (Priority 1):
+    - Pneumonia_img1.png → Pneumonia=1 (positive)
+    - Effusion_img23.png → Effusion=1 (positive)
+    
+    FOLDER-BASED (Priority 2):
+    - pneumonia_positive/img1.png → Pneumonia=1
+    - pneumonia_negative/img2.png → Pneumonia=0
+    - pneumonia_1/img3.png → Pneumonia=1
+    - pneumonia_0/img4.png → Pneumonia=0
+    - pneumonia/positive/img5.png → Pneumonia=1
+    - pneumonia/negative/img6.png → Pneumonia=0
+    - normal/img7.png → Normal=1
     
     Args:
         img_path: Path to the image file
@@ -48,7 +100,15 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
         Dictionary mapping pathology names to binary labels (0 or 1)
         Returns None if no label pattern is found
     """
-    # Get folder name (parent directory)
+    # PRIORITY 1: Check filename first
+    filename = img_path.stem  # Without extension
+    pathology_from_filename = extract_pathology_from_filename(filename)
+    
+    if pathology_from_filename:
+        # Filename contains pathology - this is a POSITIVE case
+        return {pathology_from_filename: 1}
+    
+    # PRIORITY 2: Check immediate folder name
     folder_name = img_path.parent.name.lower()
     
     # Check for "normal" folders
@@ -91,14 +151,34 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
             if pathology in parent_folder:
                 labels[pathology.capitalize()] = 1
                 return labels
+        # Also check if parent is just the pathology name
+        if parent_folder.replace('_', '').replace('-', '') in [p.replace('_', '') for p in pathologies]:
+            for pathology in pathologies:
+                if pathology.replace('_', '') == parent_folder.replace('_', '').replace('-', ''):
+                    labels[pathology.capitalize()] = 1
+                    return labels
     elif 'negative' in folder_name:
         parent_folder = img_path.parent.parent.name.lower()
         for pathology in pathologies:
             if pathology in parent_folder:
                 labels[pathology.capitalize()] = 0
                 return labels
+        # Also check if parent is just the pathology name
+        if parent_folder.replace('_', '').replace('-', '') in [p.replace('_', '') for p in pathologies]:
+            for pathology in pathologies:
+                if pathology.replace('_', '') == parent_folder.replace('_', '').replace('-', ''):
+                    labels[pathology.capitalize()] = 0
+                    return labels
     
-    # Pattern 4: Check for pathology name with numeric suffix
+    # Pattern 4: Just pathology name in folder (assume positive)
+    for pathology in pathologies:
+        if folder_name == pathology or folder_name.replace('_', '').replace('-', '') == pathology.replace('_', ''):
+            # Folder is just the pathology name, check subfolder for pos/neg
+            # If no subfolder pattern, assume it's positive
+            labels[pathology.capitalize()] = 1
+            return labels
+    
+    # Pattern 5: Check for pathology name with numeric suffix
     match = re.search(r'(\w+)[_-]?([01])', folder_name)
     if match:
         potential_pathology = match.group(1)
@@ -111,6 +191,87 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
     
     # No pattern found
     return None
+
+
+def validate_labels_in_folder(folder_path: Path, recursive: bool = True) -> Dict:
+    """
+    Validate and show statistics about label detection in a folder.
+    
+    Args:
+        folder_path: Path to the folder
+        recursive: Whether to search recursively
+    
+    Returns:
+        Dictionary with label statistics
+    """
+    if not folder_path.exists() or not folder_path.is_dir():
+        return {'valid': False, 'error': 'Invalid folder path'}
+    
+    images = get_image_paths(folder_path, recursive=recursive)
+    
+    if len(images) == 0:
+        return {'valid': False, 'error': 'No images found'}
+    
+    # Analyze labels
+    label_stats = {
+        'total_images': len(images),
+        'labeled_count': 0,
+        'unlabeled_count': 0,
+        'filename_labels': 0,
+        'folder_labels': 0,
+        'pathology_breakdown': {},
+        'labeled_files': [],
+        'unlabeled_files': []
+    }
+    
+    for img_path in images:
+        # Check filename pattern
+        filename_pathology = extract_pathology_from_filename(img_path.stem)
+        
+        # Check folder pattern
+        folder_label = extract_folder_label(img_path)
+        
+        if folder_label is not None:
+            label_stats['labeled_count'] += 1
+            
+            # Determine source of label
+            if filename_pathology:
+                label_stats['filename_labels'] += 1
+                source = 'filename'
+            else:
+                label_stats['folder_labels'] += 1
+                source = 'folder'
+            
+            # Track pathology breakdown
+            for pathology, value in folder_label.items():
+                if pathology not in label_stats['pathology_breakdown']:
+                    label_stats['pathology_breakdown'][pathology] = {
+                        'positive': 0, 'negative': 0
+                    }
+                
+                if value == 1:
+                    label_stats['pathology_breakdown'][pathology]['positive'] += 1
+                else:
+                    label_stats['pathology_breakdown'][pathology]['negative'] += 1
+            
+            label_stats['labeled_files'].append({
+                'filename': img_path.name,
+                'folder': img_path.parent.name,
+                'pathology': list(folder_label.keys())[0],
+                'label': list(folder_label.values())[0],
+                'source': source
+            })
+        else:
+            label_stats['unlabeled_count'] += 1
+            label_stats['unlabeled_files'].append({
+                'filename': img_path.name,
+                'folder': img_path.parent.name
+            })
+    
+    label_stats['valid'] = True
+    label_stats['label_percentage'] = (label_stats['labeled_count'] / len(images)) * 100
+    
+    return label_stats
 
 
 def save_results_to_csv(results: List[Dict], output_path: str):
