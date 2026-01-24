@@ -132,7 +132,7 @@ def plot_confusion_matrix_heatmap(cm, title="Confusion Matrix", labels=['Negativ
             )
         )
     
-    # Create heatmap
+    # Create heatmap with FIXED colorbar configuration
     fig = go.Figure(data=go.Heatmap(
         z=cm,
         x=labels,
@@ -141,8 +141,10 @@ def plot_confusion_matrix_heatmap(cm, title="Confusion Matrix", labels=['Negativ
         showscale=True,
         hovertemplate='Predicted: %{x}<br>Actual: %{y}<br>Count: %{z}<extra></extra>',
         colorbar=dict(
-            title="Count",
-            titleside="right",
+            title=dict(
+                text="Count",
+                side="right"
+            ),
             tickmode="linear",
             tick0=0,
             dtick=max(1, cm.max() // 5)
