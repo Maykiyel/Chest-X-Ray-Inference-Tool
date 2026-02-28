@@ -1,16 +1,22 @@
 """Service layer for model loading, batch inference, and result summaries."""
 
 from pathlib import Path
+import hashlib
+import json
 import tempfile
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from uuid import uuid4
 
 import pandas as pd
+from PIL import Image, ImageStat
 import streamlit as st
 
 from inference import load_models, predict_batch
+from utils import extract_folder_label, get_image_paths
 
 
 ProgressCallback = Optional[Callable[[int, float], None]]
+CONFIG_FILE = Path('.app_config.json')
 
 
 @st.cache_resource(show_spinner=False)
@@ -75,3 +81,172 @@ def build_top_findings_summary(filtered_df: pd.DataFrame) -> pd.DataFrame:
         .first()[['filename', 'model', 'pathology', 'probability']]
         .rename(columns={'pathology': 'top_pathology', 'probability': 'top_probability'})
     )
+
+
+def apply_results_preset(df: pd.DataFrame, preset: str) -> pd.DataFrame:
+    """Apply a UI-friendly preset filter to a results dataframe."""
+    if df.empty:
+        return df
+
+    if preset == 'High confidence (≥0.70)':
+        return df[df['probability'] >= 0.70]
+    if preset == 'Top finding per image/model':
+        top_df = build_top_findings_summary(df)
+        return top_df.rename(columns={'top_pathology': 'pathology', 'top_probability': 'probability'})
+
+    return df
+
+
+def create_run_snapshot(results_df: pd.DataFrame, run_stats: Optional[dict], label: str) -> dict:
+    """Create a serializable run snapshot for quick reload/compare UX."""
+    stats = run_stats or {}
+    return {
+        'id': str(uuid4())[:8],
+        'label': label,
+        'timestamp': pd.Timestamp.utcnow().isoformat(),
+        'rows': len(results_df),
+        'results': results_df.copy(),
+        'stats': dict(stats),
+    }
+
+
+def save_snapshot_to_history(snapshot: dict, base_dir: str = '.run_history') -> Path:
+    """Persist snapshot metadata + results to local run-history storage."""
+    history_dir = Path(base_dir)
+    history_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = snapshot['id']
+    metadata_path = history_dir / f'{run_id}.json'
+    csv_path = history_dir / f'{run_id}.csv'
+
+    metadata = {k: v for k, v in snapshot.items() if k != 'results'}
+    metadata['csv_file'] = csv_path.name
+
+    with open(metadata_path, 'w', encoding='utf-8') as handle:
+        json.dump(metadata, handle, indent=2)
+
+    snapshot['results'].to_csv(csv_path, index=False)
+    return metadata_path
+
+
+def list_run_history(base_dir: str = '.run_history') -> List[dict]:
+    """List persisted run-history metadata records."""
+    history_dir = Path(base_dir)
+    if not history_dir.exists():
+        return []
+
+    records = []
+    for metadata_path in sorted(history_dir.glob('*.json')):
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as handle:
+                records.append(json.load(handle))
+        except Exception:
+            continue
+
+    return sorted(records, key=lambda item: item.get('timestamp', ''), reverse=True)
+
+
+def load_snapshot_from_history(run_id: str, base_dir: str = '.run_history') -> Optional[dict]:
+    """Load a persisted run snapshot by id."""
+    history_dir = Path(base_dir)
+    metadata_path = history_dir / f'{run_id}.json'
+    if not metadata_path.exists():
+        return None
+
+    with open(metadata_path, 'r', encoding='utf-8') as handle:
+        metadata = json.load(handle)
+
+    csv_name = metadata.get('csv_file', f'{run_id}.csv')
+    csv_path = history_dir / csv_name
+    if not csv_path.exists():
+        return None
+
+    results_df = pd.read_csv(csv_path)
+    return {
+        'id': metadata.get('id', run_id),
+        'label': metadata.get('label', run_id),
+        'timestamp': metadata.get('timestamp'),
+        'rows': metadata.get('rows', len(results_df)),
+        'results': results_df,
+        'stats': metadata.get('stats', {}),
+    }
+
+
+def audit_folder_quality(folder_path: Path, recursive: bool = True) -> dict:
+    """Basic data-quality audit for imaging folder."""
+    images = get_image_paths(folder_path, recursive=recursive)
+    stats = {
+        'total_images': len(images),
+        'unreadable': [],
+        'low_contrast': [],
+        'small_resolution': [],
+        'duplicates': {},
+        'labeled_count': 0,
+    }
+    hashes = {}
+
+    for image_path in images:
+        if extract_folder_label(image_path) is not None:
+            stats['labeled_count'] += 1
+
+        try:
+            with Image.open(image_path) as img:
+                gray = img.convert('L')
+                width, height = gray.size
+                contrast = float(ImageStat.Stat(gray).stddev[0])
+                if width < 256 or height < 256:
+                    stats['small_resolution'].append({'file': image_path.name, 'size': f'{width}x{height}'})
+                if contrast < 20.0:
+                    stats['low_contrast'].append({'file': image_path.name, 'contrast_std': round(contrast, 2)})
+        except Exception as exc:
+            stats['unreadable'].append({'file': image_path.name, 'error': str(exc)})
+            continue
+
+        digest = hashlib.md5(image_path.read_bytes()).hexdigest()
+        hashes.setdefault(digest, []).append(image_path.name)
+
+    stats['duplicates'] = {k: v for k, v in hashes.items() if len(v) > 1}
+    stats['label_percentage'] = round((stats['labeled_count'] / stats['total_images'] * 100), 1) if stats['total_images'] else 0.0
+    return stats
+
+
+def get_image_explainability(results_df: pd.DataFrame, filename: str) -> dict:
+    """Build lightweight explainability summary for one image."""
+    subset = results_df[results_df['filename'] == filename].copy()
+    if subset.empty:
+        return {'available': False}
+
+    top3 = (
+        subset.sort_values('probability', ascending=False)
+        .groupby('model', as_index=False)
+        .head(3)[['model', 'pathology', 'probability']]
+    )
+    top1 = subset.sort_values('probability', ascending=False).groupby('model', as_index=False).first()
+    agreement_pathology = top1['pathology'].mode().iloc[0] if not top1.empty else None
+    agreement_score = round((top1['pathology'] == agreement_pathology).mean(), 2) if agreement_pathology else 0.0
+
+    normal_rows = subset[subset['pathology'] == 'Normal']
+    normal_confidence = float(normal_rows['probability'].mean()) if not normal_rows.empty else 0.0
+
+    return {
+        'available': True,
+        'top3': top3,
+        'agreement_pathology': agreement_pathology,
+        'agreement_score': agreement_score,
+        'normal_confidence': round(normal_confidence, 3),
+    }
+
+
+def load_app_config() -> dict:
+    """Load user config from json file if available."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def save_app_config(config: dict) -> None:
+    """Save user config to json file."""
+    CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding='utf-8')

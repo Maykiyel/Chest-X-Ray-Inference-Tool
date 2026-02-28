@@ -11,7 +11,13 @@ SESSION_DEFAULTS = {
     'prediction_cache_key': 0,
     'debug_mode': False,
     'last_run_stats': None,
+    'saved_runs': [],
+    'active_run_id': None,
+    'history_refresh_key': 0,
+    'batch_jobs': [],
+    'next_job_id': 1,
 }
+
 
 
 def initialize_session_state() -> None:
