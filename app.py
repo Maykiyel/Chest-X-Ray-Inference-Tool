@@ -18,6 +18,10 @@ from app_services import (
     save_snapshot_to_history,
     list_run_history,
     load_snapshot_from_history,
+    audit_folder_quality,
+    get_image_explainability,
+    load_app_config,
+    save_app_config,
 )
 from app_state import initialize_session_state
 
@@ -39,6 +43,12 @@ st.markdown("""
 
 # Initialize session state
 initialize_session_state()
+
+THRESHOLD_PRESETS = {
+    'Screening (high sensitivity)': 0.35,
+    'Balanced': 0.50,
+    'Confirmatory (high specificity)': 0.70,
+}
 
 st.title("🫁 Chest X-Ray Inference Tool")
 st.markdown("Advanced multi-model inference using TorchXRayVision")
@@ -106,6 +116,24 @@ with st.sidebar:
 
     st.subheader("🐞 Developer Tools")
     st.session_state.debug_mode = st.checkbox("Enable debug panel", value=st.session_state.debug_mode)
+
+    with st.expander("⚙️ JSON Configuration", expanded=False):
+        if st.button("Load config", use_container_width=True):
+            cfg = load_app_config()
+            if cfg:
+                st.session_state.selected_pathologies = cfg.get('default_pathologies', st.session_state.selected_pathologies)
+                st.success("Loaded .app_config.json")
+            else:
+                st.info("No config found or invalid config.")
+        default_threshold_mode = st.selectbox("Default threshold mode", list(THRESHOLD_PRESETS.keys()), index=1)
+        if st.button("Save current setup as config", use_container_width=True):
+            save_app_config({
+                'default_models': selected_models,
+                'default_pathologies': selected_pathologies,
+                'default_threshold_mode': default_threshold_mode,
+                'default_batch_size': batch_size,
+            })
+            st.success("Saved .app_config.json")
     
     st.divider()
     
@@ -120,7 +148,7 @@ with st.sidebar:
         st.rerun()
 
 # Main tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📁 Inference", "📊 Results", "🔢 Confusion Matrix", "📝 Rename Files", "🏷️ Label Preview"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📁 Inference", "📊 Results", "🔢 Confusion Matrix", "📝 Rename Files", "🏷️ Label Preview", "🧪 Audit & Explainability"])
 
 with tab1:
     st.header("Upload Images")
@@ -223,91 +251,113 @@ with tab1:
         if folder_path:
             if not setup_ready:
                 st.info("Select at least one model and pathology to run batch processing.")
-            if setup_ready and st.button("🚀 Process", use_container_width=True):
-                st.session_state.prediction_cache_key += 1
-                folder = Path(folder_path)
-                
-                # Check if path exists and provide helpful feedback
-                if not folder.exists():
-                    st.error(f"❌ Folder not found: `{folder.absolute()}`")
-                    
-                    # Suggest alternatives
-                    st.markdown("**Try these:**")
-                    
-                    # Check if it's a relative path issue
-                    import os
-                    cwd = Path(os.getcwd())
-                    
-                    # Try common variations
-                    alternatives = [
-                        Path(folder_path),  # As-is
-                        cwd / folder_path,  # Relative to current dir
-                        Path(folder_path.lstrip('/')),  # Remove leading slash
-                        Path(folder_path.lstrip('./')),  # Remove ./
-                    ]
-                    
-                    st.code(f"Current directory: {cwd}", language="bash")
-                    
-                    for alt in alternatives:
-                        if alt.exists() and alt.is_dir():
-                            st.success(f"✓ Found folder at: `{alt.absolute()}`")
-                            st.info(f"💡 Try entering: `{alt.name}` or `{alt.absolute()}`")
-                            break
+
+            enqueue_col, start_col = st.columns(2)
+            with enqueue_col:
+                if setup_ready and st.button("➕ Enqueue Batch Job", use_container_width=True):
+                    folder = Path(folder_path)
+                    if folder.exists() and folder.is_dir():
+                        st.session_state.batch_jobs.append({
+                            'job_id': st.session_state.next_job_id,
+                            'folder_path': str(folder),
+                            'recursive': recursive_search,
+                            'auto_label': auto_label,
+                            'status': 'queued',
+                            'progress': 0.0,
+                            'created_at': datetime.now().isoformat(),
+                            'message': '',
+                            'cancel_requested': False,
+                        })
+                        st.session_state.next_job_id += 1
+                        st.success("Batch job queued.")
                     else:
-                        st.warning("Folder not found in common locations. Please check the path.")
-                        st.markdown("""
-                        **Tips:**
-                        - Use `test` for a folder named 'test' in the current directory
-                        - Use `./test` for the same
-                        - Use full path: `C:\\Users\\Name\\folder\\test` (Windows)
-                        - Use full path: `/home/user/folder/test` (Linux/Mac)
-                        """)
-                    
-                elif not folder.is_dir():
-                    st.error(f"❌ Path exists but is not a folder: `{folder.absolute()}`")
-                else:
-                    # Path is valid, proceed
-                    run_started = time.perf_counter()
-                    with st.spinner("Loading models..."):
-                        models = get_cached_models(tuple(sorted(selected_models)), device)
-                    
-                    if models:
-                        image_paths = get_image_paths(folder, recursive=recursive_search)
-                        
-                        if image_paths:
-                            st.success(f"✓ Found {len(image_paths)} images in: `{folder.absolute()}`")
-                            
-                            progress_bar = st.progress(0)
-                            all_results = []
-                            
-                            for model_idx, (model_name, model) in enumerate(models.items()):
-                                def update_progress(p):
-                                    progress_bar.progress((model_idx + p) / len(models))
-                                
-                                results = predict_batch(
-                                    image_paths, model, model_name, device,
-                                    batch_size=batch_size, auto_label=auto_label,
-                                    progress_callback=update_progress
-                                )
-                                all_results.extend(results)
-                            
-                            if all_results:
-                                df = pd.DataFrame(all_results)
-                                df = df[df['pathology'].isin(selected_pathologies)]
-                                st.session_state.results_df = df
-                                st.session_state.last_run_stats = {
-                                    'mode': 'folder',
-                                    'image_count': len(image_paths),
-                                    'model_count': len(models),
-                                    'rows': len(df),
-                                    'device': device,
-                                    'duration_sec': round(time.perf_counter() - run_started, 2),
-                                }
-                                st.success(f"✅ Processed {len(image_paths)} images!")
-                                st.balloons()
-                        else:
-                            st.warning(f"No images found in: `{folder.absolute()}`")
-                            st.info("Supported formats: .png, .jpg, .jpeg, .dcm, .dicom")
+                        st.error("Invalid folder path. Please verify and try again.")
+                        st.info("Try sample dataset: point to your local test folder and enqueue again.")
+            with start_col:
+                if setup_ready and st.button("▶️ Run Next Job", use_container_width=True):
+                    queued_job = next((j for j in st.session_state.batch_jobs if j['status'] == 'queued'), None)
+                    if queued_job is None:
+                        st.info("No queued jobs available.")
+                    else:
+                        queued_job['status'] = 'running'
+                        run_started = time.perf_counter()
+                        try:
+                            with st.spinner("Loading models..."):
+                                models = get_cached_models(tuple(sorted(selected_models)), device)
+
+                            if not models:
+                                queued_job['status'] = 'failed'
+                                queued_job['message'] = 'No models loaded.'
+                            else:
+                                image_paths = get_image_paths(Path(queued_job['folder_path']), recursive=queued_job['recursive'])
+                                if not image_paths:
+                                    queued_job['status'] = 'failed'
+                                    queued_job['message'] = 'No supported images found.'
+                                else:
+                                    progress_bar = st.progress(0)
+                                    all_results = []
+                                    for model_idx, (model_name, model) in enumerate(models.items()):
+                                        def update_progress(p):
+                                            queued_job['progress'] = (model_idx + p) / len(models)
+                                            progress_bar.progress(queued_job['progress'])
+
+                                        if queued_job.get('cancel_requested'):
+                                            queued_job['status'] = 'cancelled'
+                                            queued_job['message'] = 'Cancelled by user.'
+                                            break
+
+                                        results = predict_batch(
+                                            image_paths,
+                                            model,
+                                            model_name,
+                                            device,
+                                            batch_size=batch_size,
+                                            auto_label=queued_job['auto_label'],
+                                            progress_callback=update_progress,
+                                        )
+                                        all_results.extend(results)
+
+                                    if queued_job['status'] != 'cancelled':
+                                        df = pd.DataFrame(all_results)
+                                        df = df[df['pathology'].isin(selected_pathologies)]
+                                        st.session_state.results_df = df
+                                        st.session_state.last_run_stats = {
+                                            'mode': 'folder',
+                                            'image_count': len(image_paths),
+                                            'model_count': len(models),
+                                            'rows': len(df),
+                                            'device': device,
+                                            'batch_size': batch_size,
+                                            'selected_models': selected_models,
+                                            'selected_pathologies': selected_pathologies,
+                                            'duration_sec': round(time.perf_counter() - run_started, 2),
+                                        }
+                                        queued_job['status'] = 'completed'
+                                        queued_job['progress'] = 1.0
+                                        queued_job['message'] = f"Processed {len(image_paths)} images."
+                                        st.success(queued_job['message'])
+                        except Exception as exc:
+                            queued_job['status'] = 'failed'
+                            queued_job['message'] = f'Inference exception: {exc}'
+                            st.error(queued_job['message'])
+
+            if st.session_state.batch_jobs:
+                st.subheader("Batch Queue Lifecycle")
+                jobs_df = pd.DataFrame(st.session_state.batch_jobs)
+                st.dataframe(jobs_df[['job_id', 'folder_path', 'status', 'progress', 'created_at', 'message']], use_container_width=True, hide_index=True)
+                job_ids = [j['job_id'] for j in st.session_state.batch_jobs if j['status'] in ['queued', 'running']]
+                if job_ids:
+                    cancel_job_id = st.selectbox('Select job to cancel', job_ids)
+                    if st.button('🛑 Cancel Selected Job', use_container_width=True):
+                        for job in st.session_state.batch_jobs:
+                            if job['job_id'] == cancel_job_id:
+                                if job['status'] == 'queued':
+                                    job['status'] = 'cancelled'
+                                    job['message'] = 'Cancelled before execution.'
+                                else:
+                                    job['cancel_requested'] = True
+                                break
+                        st.warning('Cancellation requested.')
 
 with tab2:
     st.header("Results & Analysis")
@@ -336,12 +386,25 @@ with tab2:
             min_prob = st.slider("Min Probability", 0.0, 1.0, 0.0, 0.05)
         with col4:
             preset_filter = st.selectbox("View Preset", ['All results', 'High confidence (≥0.70)', 'Top finding per image/model'])
+
+        top_only = st.toggle('Top findings only', value=False)
+        sort_preset = st.selectbox('Sort preset', ['Highest risk first', 'By model', 'By image'])
         
         filtered_df = df[df['model'].isin(model_filter)]
         if pathology_filter:
             filtered_df = filtered_df[filtered_df['pathology'].isin(pathology_filter)]
         filtered_df = filtered_df[filtered_df['probability'] >= min_prob]
         filtered_df = apply_results_preset(filtered_df, preset_filter)
+        if top_only:
+            filtered_df = apply_results_preset(filtered_df, 'Top finding per image/model')
+
+        if 'probability' in filtered_df.columns:
+            if sort_preset == 'By model':
+                filtered_df = filtered_df.sort_values(['model', 'probability'], ascending=[True, False])
+            elif sort_preset == 'By image':
+                filtered_df = filtered_df.sort_values(['filename', 'probability'], ascending=[True, False])
+            else:
+                filtered_df = filtered_df.sort_values('probability', ascending=False)
         
         if st.session_state.last_run_stats:
             stats = st.session_state.last_run_stats
@@ -362,7 +425,12 @@ with tab2:
                 st.session_state.active_run_id = None
                 st.info('Saved runs cleared.')
 
-        st.dataframe(filtered_df.sort_values('probability', ascending=False), use_container_width=True, height=400)
+        if not filtered_df.empty and 'probability' in filtered_df.columns:
+            display_df = filtered_df.copy()
+            display_df['confidence_band'] = pd.cut(display_df['probability'], bins=[0,0.4,0.7,1.0], labels=['Low','Medium','High'], include_lowest=True)
+            st.dataframe(display_df, use_container_width=True, height=400)
+        else:
+            st.dataframe(filtered_df, use_container_width=True, height=400)
 
         st.subheader("Top Findings per Image")
         if not filtered_df.empty:
@@ -391,6 +459,24 @@ with tab2:
                     st.success('Deleted selected run.')
                     st.rerun()
 
+
+
+        if len(st.session_state.saved_runs) >= 2:
+            st.subheader('Run Comparison')
+            compare_options = {f"{r['label']} ({r['rows']} rows)": r for r in st.session_state.saved_runs}
+            c1, c2 = st.columns(2)
+            with c1:
+                run_a_label = st.selectbox('Run A', list(compare_options.keys()), key='run_a')
+            with c2:
+                run_b_label = st.selectbox('Run B', list(compare_options.keys()), index=1, key='run_b')
+            run_a = compare_options[run_a_label]
+            run_b = compare_options[run_b_label]
+            comp_df = pd.DataFrame([
+                {'metric': 'rows', 'run_a': run_a['rows'], 'run_b': run_b['rows']},
+                {'metric': 'images', 'run_a': run_a['results']['filename'].nunique(), 'run_b': run_b['results']['filename'].nunique()},
+                {'metric': 'models', 'run_a': run_a['results']['model'].nunique(), 'run_b': run_b['results']['model'].nunique()},
+            ])
+            st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
         st.subheader('Run History (persisted on disk)')
         history_rows = list_run_history()
@@ -452,7 +538,7 @@ with tab3:
             st.success(f"✓ Ground truth detected for {df['ground_truth'].notna().sum()} predictions")
             
             # Filters
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 model_cm = st.selectbox("Model", df['model'].unique())
             with col2:
@@ -460,7 +546,9 @@ with tab3:
                 pathologies_with_gt = df[df['ground_truth'].notna()]['pathology'].unique()
                 pathology_cm = st.selectbox("Pathology", sorted(pathologies_with_gt))
             with col3:
-                threshold = st.slider("Threshold", 0.0, 1.0, 0.5, 0.05)
+                threshold_mode = st.selectbox('Threshold mode', list(THRESHOLD_PRESETS.keys()), index=1)
+            with col4:
+                threshold = st.slider("Threshold", 0.0, 1.0, THRESHOLD_PRESETS[threshold_mode], 0.05)
             
             if st.button("📊 Generate Matrix", use_container_width=True, type="primary"):
                 # Filter data
@@ -550,6 +638,8 @@ with tab4:
         start_num = st.number_input("Start Number", min_value=1, value=1)
     
     include_subfolders_rename = st.checkbox("Include subfolders", value=False)
+    dry_run = st.checkbox('Dry run (preview only)', value=True)
+    collision_policy = st.selectbox('Collision policy', ['skip', 'overwrite', 'append_suffix'])
     
     if rename_folder:
         folder = Path(rename_folder)
@@ -611,25 +701,39 @@ with tab4:
                         # Rename files
                         success_count = 0
                         errors = []
+                        undo_records = []
                         
                         for old_path, new_name in rename_map.items():
                             try:
                                 new_path = old_path.parent / new_name
-                                
-                                # Check if target exists
+
                                 if new_path.exists():
-                                    errors.append(f"{new_name}: File already exists")
-                                    continue
+                                    if collision_policy == 'skip':
+                                        errors.append(f"{new_name}: File already exists")
+                                        continue
+                                    elif collision_policy == 'append_suffix':
+                                        stem = new_path.stem
+                                        suffix = new_path.suffix
+                                        new_path = new_path.parent / f"{stem}_dup{suffix}"
+                                    # overwrite falls through
                                 
-                                old_path.rename(new_path)
+                                if not dry_run:
+                                    old_path.rename(new_path)
+                                    undo_records.append(f"{new_path.name} -> {old_path.name}")
                                 success_count += 1
                             except Exception as e:
                                 errors.append(f"{old_path.name}: {str(e)}")
                         
                         if success_count == len(rename_map):
-                            st.success(f"✅ Renamed {success_count} files as **{pathology_for_rename}** images!")
-                            st.info(f"📁 Backup saved: {backup_path.name}")
-                            st.balloons()
+                            if dry_run:
+                                st.success(f"✅ Dry run complete for {success_count} files. No files were changed.")
+                            else:
+                                st.success(f"✅ Renamed {success_count} files as **{pathology_for_rename}** images!")
+                                st.info(f"📁 Backup saved: {backup_path.name}")
+                                undo_file = folder / 'rename_undo_last.txt'
+                                undo_file.write_text('\n'.join(undo_records), encoding='utf-8')
+                                st.info(f"↩️ Undo map saved: {undo_file.name}")
+                                st.balloons()
                         else:
                             st.warning(f"⚠️ Renamed {success_count}/{len(rename_map)} files")
                             if errors:
@@ -639,6 +743,22 @@ with tab4:
                                     if len(errors) > 20:
                                         st.info(f"... and {len(errors) - 20} more errors")
                 
+                if st.button('↩️ Undo Last Rename', use_container_width=True):
+                    undo_file = folder / 'rename_undo_last.txt'
+                    if undo_file.exists():
+                        lines = [line.strip() for line in undo_file.read_text(encoding='utf-8').splitlines() if '->' in line]
+                        undone = 0
+                        for line in lines:
+                            new_name, old_name = [x.strip() for x in line.split('->')]
+                            new_path = folder / new_name
+                            old_path = folder / old_name
+                            if new_path.exists() and not old_path.exists():
+                                new_path.rename(old_path)
+                                undone += 1
+                        st.success(f'Undo completed for {undone} files.')
+                    else:
+                        st.info('No undo file found yet.')
+
                 with col2:
                     # Download mapping CSV
                     mapping_df = pd.DataFrame([
@@ -802,6 +922,52 @@ with tab5:
                         )
                 else:
                     st.error(stats.get('error', 'Unknown error'))
+
+
+with tab6:
+    st.header("🧪 Data Quality Audit + Explainability")
+
+    st.subheader("Data Quality Audit")
+    audit_folder = st.text_input("Audit folder path", placeholder="test")
+    audit_recursive = st.checkbox("Audit recursively", value=True)
+    if audit_folder and st.button("Run Audit", use_container_width=True):
+        folder = Path(audit_folder)
+        if not folder.exists() or not folder.is_dir():
+            st.error("Invalid audit folder path.")
+            st.info("Try sample dataset: use your test folder path and click Run Audit.")
+        else:
+            audit = audit_folder_quality(folder, recursive=audit_recursive)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Images", audit['total_images'])
+            c2.metric("Label completeness", f"{audit['label_percentage']}%")
+            c3.metric("Unreadable", len(audit['unreadable']))
+            c4.metric("Duplicate groups", len(audit['duplicates']))
+
+            if audit['small_resolution']:
+                st.warning("Unusual small-resolution images detected")
+                st.dataframe(pd.DataFrame(audit['small_resolution'][:20]), use_container_width=True, hide_index=True)
+            if audit['low_contrast']:
+                st.warning("Low-contrast images detected")
+                st.dataframe(pd.DataFrame(audit['low_contrast'][:20]), use_container_width=True, hide_index=True)
+            if audit['duplicates']:
+                dup_df = pd.DataFrame([{'hash': h, 'files': ', '.join(v)} for h, v in audit['duplicates'].items()])
+                st.info("Potential duplicate files")
+                st.dataframe(dup_df, use_container_width=True, hide_index=True)
+
+    st.subheader("Per-image Explainability")
+    if st.session_state.results_df is None or st.session_state.results_df.empty:
+        st.info("Run inference first to unlock explainability cards.")
+    else:
+        filenames = sorted(st.session_state.results_df['filename'].unique())
+        selected_image = st.selectbox("Select image", filenames)
+        explain = get_image_explainability(st.session_state.results_df, selected_image)
+        if explain.get('available'):
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Model agreement", f"{explain['agreement_score']*100:.0f}%")
+            col2.metric("Consensus pathology", explain['agreement_pathology'] or 'n/a')
+            col3.metric("Normality confidence", f"{explain['normal_confidence']:.3f}")
+            st.dataframe(explain['top3'], use_container_width=True, hide_index=True)
+
 
 
 if st.session_state.debug_mode:

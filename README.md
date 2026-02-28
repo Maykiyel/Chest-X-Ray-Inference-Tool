@@ -70,6 +70,10 @@ This is useful when debugging performance, filtering behavior, and caching effec
 - Results view presets (all / high confidence / top finding)
 - Save, reload, and manage run snapshots for easy comparisons
 - Persistent run history stored locally in `.run_history/` for later reload
+- Batch queue lifecycle with queued/running/completed/cancelled states
+- Data quality audit (duplicates, unreadable, low-contrast, small-resolution)
+- Per-image explainability card (top-3 findings, agreement score, normality confidence)
+- Clinical threshold presets: screening / balanced / confirmatory
 
 ---
 

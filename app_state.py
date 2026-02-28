@@ -14,6 +14,8 @@ SESSION_DEFAULTS = {
     'saved_runs': [],
     'active_run_id': None,
     'history_refresh_key': 0,
+    'batch_jobs': [],
+    'next_job_id': 1,
 }
 
 
