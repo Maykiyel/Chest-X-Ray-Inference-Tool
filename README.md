@@ -22,6 +22,27 @@ A professional, GPU-accelerated application for chest X-ray analysis using state
 
 ---
 
+## 🧱 Project Structure (for easier coding/debugging)
+
+The app is split into focused modules so you can iterate faster:
+
+- `app.py` → Streamlit UI composition (tabs, widgets, layout)
+- `app_services.py` → model caching + upload inference orchestration + summary helpers
+- `app_state.py` → session-state defaults/initialization
+- `app_constants.py` → shared pathology/default lists
+- `inference.py` / `metrics.py` / `utils.py` → inference pipeline, evaluation, utilities
+
+### Debug mode
+
+In the sidebar, enable **Developer Tools → Enable debug panel** to inspect:
+- selected device/models/pathology count
+- cache key and last run stats (mode, image count, rows)
+- preview of current in-memory results dataframe
+
+This is useful when debugging performance, filtering behavior, and caching effects.
+
+---
+
 ## 🌟 Features
 
 ✅ **Multi-Model Support**
