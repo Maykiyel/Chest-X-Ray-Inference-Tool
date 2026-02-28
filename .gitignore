@@ -41,6 +41,7 @@ roc_curve_*.html
 xray_predictions_*.csv
 *.csv
 *.html
+.run_history
 
 # Exception: Keep example files if you add them
 !example_*.csv
