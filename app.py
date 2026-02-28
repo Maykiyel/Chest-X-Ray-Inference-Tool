@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 import torch
 from pathlib import Path
-import time
 from datetime import datetime
-import plotly.graph_objects as go
-import shutil
 
-from inference import load_models, predict_single_image, predict_batch
-from utils import get_image_paths, extract_folder_label, save_results_to_csv, extract_pathology_from_filename, validate_labels_in_folder
+from inference import predict_batch
+from utils import get_image_paths, validate_labels_in_folder
 from metrics import compute_confusion_matrix_metrics, plot_confusion_matrix_heatmap
+from app_constants import ALL_PATHOLOGIES, DEFAULT_COMMON_PATHOLOGIES
+from app_services import get_cached_models, run_upload_inference, build_top_findings_summary
+from app_state import initialize_session_state
 
 # Page configuration
 st.set_page_config(
@@ -28,20 +28,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # Initialize session state
-if 'results_df' not in st.session_state:
-    st.session_state.results_df = None
-if 'models_loaded' not in st.session_state:
-    st.session_state.models_loaded = {}
-if 'selected_pathologies' not in st.session_state:
-    st.session_state.selected_pathologies = []
-if 'prediction_cache_key' not in st.session_state:
-    st.session_state.prediction_cache_key = 0
-
-ALL_PATHOLOGIES = [
-    'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
-    'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass', 'Nodule',
-    'Pleural_Thickening', 'Pneumonia', 'Pneumothorax', 'Normal'
-]
+initialize_session_state()
 
 st.title("🫁 Chest X-Ray Inference Tool")
 st.markdown("Advanced multi-model inference using TorchXRayVision")
@@ -66,10 +53,7 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Common", use_container_width=True):
-            st.session_state.selected_pathologies = [
-                'Atelectasis', 'Cardiomegaly', 'Effusion', 
-                'Edema', 'Pneumonia', 'Pneumothorax', 'Normal'
-            ]
+            st.session_state.selected_pathologies = DEFAULT_COMMON_PATHOLOGIES.copy()
     with col2:
         if st.button("All", use_container_width=True):
             st.session_state.selected_pathologies = ALL_PATHOLOGIES.copy()
@@ -77,10 +61,7 @@ with st.sidebar:
     selected_pathologies = st.multiselect(
         "Choose pathologies:",
         options=ALL_PATHOLOGIES,
-        default=st.session_state.selected_pathologies if st.session_state.selected_pathologies else [
-            'Atelectasis', 'Cardiomegaly', 'Effusion', 
-            'Edema', 'Pneumonia', 'Pneumothorax', 'Normal'
-        ]
+        default=st.session_state.selected_pathologies if st.session_state.selected_pathologies else DEFAULT_COMMON_PATHOLOGIES
     )
     st.session_state.selected_pathologies = selected_pathologies
     
@@ -112,6 +93,9 @@ with st.sidebar:
     st.subheader("Batch Processing")
     batch_size = st.slider("Batch Size", 1, 64 if device == 'cuda' else 16, 
                            16 if device == 'cuda' else 4)
+
+    st.subheader("🐞 Developer Tools")
+    st.session_state.debug_mode = st.checkbox("Enable debug panel", value=st.session_state.debug_mode)
     
     st.divider()
     
@@ -150,31 +134,37 @@ with tab1:
                 st.session_state.prediction_cache_key += 1
                 
                 with st.spinner("Loading models..."):
-                    models = load_models(selected_models, device)
+                    models = get_cached_models(tuple(sorted(selected_models)), device)
                 
                 if models:
                     progress_bar = st.progress(0)
-                    results = []
-                    
-                    for idx, file in enumerate(uploaded_files):
-                        temp_path = Path(f"temp_{st.session_state.prediction_cache_key}_{file.name}")
-                        with open(temp_path, "wb") as f:
-                            f.write(file.getbuffer())
-                        
-                        for model_name, model in models.items():
-                            try:
-                                predictions = predict_single_image(str(temp_path), model, model_name, device)
-                                results.extend(predictions)
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
-                        
-                        temp_path.unlink()
-                        progress_bar.progress((idx + 1) / len(uploaded_files))
-                    
+
+                    def update_progress(model_idx, progress):
+                        progress_bar.progress((model_idx + progress) / len(models))
+
+                    try:
+                        results = run_upload_inference(
+                            uploaded_files,
+                            models,
+                            device,
+                            batch_size,
+                            progress_callback=update_progress,
+                        )
+                    except Exception as e:
+                        st.error(f"Upload processing failed: {str(e)}")
+                        results = []
+
                     if results:
                         df = pd.DataFrame(results)
                         df = df[df['pathology'].isin(selected_pathologies)]
                         st.session_state.results_df = df
+                        st.session_state.last_run_stats = {
+                            'mode': 'upload',
+                            'image_count': len(uploaded_files),
+                            'model_count': len(models),
+                            'rows': len(df),
+                            'device': device,
+                        }
                         st.success(f"✅ Processed {len(uploaded_files)} images!")
     
     with col2:
@@ -242,7 +232,7 @@ with tab1:
                 else:
                     # Path is valid, proceed
                     with st.spinner("Loading models..."):
-                        models = load_models(selected_models, device)
+                        models = get_cached_models(tuple(sorted(selected_models)), device)
                     
                     if models:
                         image_paths = get_image_paths(folder, recursive=recursive_search)
@@ -268,6 +258,13 @@ with tab1:
                                 df = pd.DataFrame(all_results)
                                 df = df[df['pathology'].isin(selected_pathologies)]
                                 st.session_state.results_df = df
+                                st.session_state.last_run_stats = {
+                                    'mode': 'folder',
+                                    'image_count': len(image_paths),
+                                    'model_count': len(models),
+                                    'rows': len(df),
+                                    'device': device,
+                                }
                                 st.success(f"✅ Processed {len(image_paths)} images!")
                                 st.balloons()
                         else:
@@ -306,6 +303,13 @@ with tab2:
         filtered_df = filtered_df[filtered_df['probability'] >= min_prob]
         
         st.dataframe(filtered_df.sort_values('probability', ascending=False), use_container_width=True, height=400)
+
+        st.subheader("Top Findings per Image")
+        if not filtered_df.empty:
+            summary_df = build_top_findings_summary(filtered_df)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No rows match the current filters.")
         
         csv = filtered_df.to_csv(index=False)
         st.download_button(
@@ -695,6 +699,21 @@ with tab5:
                         )
                 else:
                     st.error(stats.get('error', 'Unknown error'))
+
+
+if st.session_state.debug_mode:
+    st.divider()
+    st.subheader("🐞 Debug Panel")
+    st.json({
+        'device': device,
+        'selected_models': selected_models,
+        'selected_pathologies_count': len(selected_pathologies),
+        'cache_key': st.session_state.prediction_cache_key,
+        'last_run_stats': st.session_state.last_run_stats,
+    })
+    if st.session_state.results_df is not None:
+        st.caption("Results dataframe preview (first 5 rows)")
+        st.dataframe(st.session_state.results_df.head(5), use_container_width=True, hide_index=True)
 
 # Footer
 st.divider()
