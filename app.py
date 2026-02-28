@@ -2,14 +2,24 @@ import streamlit as st
 import pandas as pd
 import torch
 from pathlib import Path
-import time
 from datetime import datetime
-import plotly.graph_objects as go
-import shutil
+import time
 
-from inference import load_models, predict_single_image, predict_batch
-from utils import get_image_paths, extract_folder_label, save_results_to_csv, extract_pathology_from_filename, validate_labels_in_folder
+from inference import predict_batch
+from utils import get_image_paths, validate_labels_in_folder
 from metrics import compute_confusion_matrix_metrics, plot_confusion_matrix_heatmap
+from app_constants import ALL_PATHOLOGIES, DEFAULT_COMMON_PATHOLOGIES
+from app_services import (
+    get_cached_models,
+    run_upload_inference,
+    build_top_findings_summary,
+    apply_results_preset,
+    create_run_snapshot,
+    save_snapshot_to_history,
+    list_run_history,
+    load_snapshot_from_history,
+)
+from app_state import initialize_session_state
 
 # Page configuration
 st.set_page_config(
@@ -28,20 +38,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # Initialize session state
-if 'results_df' not in st.session_state:
-    st.session_state.results_df = None
-if 'models_loaded' not in st.session_state:
-    st.session_state.models_loaded = {}
-if 'selected_pathologies' not in st.session_state:
-    st.session_state.selected_pathologies = []
-if 'prediction_cache_key' not in st.session_state:
-    st.session_state.prediction_cache_key = 0
-
-ALL_PATHOLOGIES = [
-    'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Effusion',
-    'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration', 'Mass', 'Nodule',
-    'Pleural_Thickening', 'Pneumonia', 'Pneumothorax', 'Normal'
-]
+initialize_session_state()
 
 st.title("🫁 Chest X-Ray Inference Tool")
 st.markdown("Advanced multi-model inference using TorchXRayVision")
@@ -66,10 +63,7 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Common", use_container_width=True):
-            st.session_state.selected_pathologies = [
-                'Atelectasis', 'Cardiomegaly', 'Effusion', 
-                'Edema', 'Pneumonia', 'Pneumothorax', 'Normal'
-            ]
+            st.session_state.selected_pathologies = DEFAULT_COMMON_PATHOLOGIES.copy()
     with col2:
         if st.button("All", use_container_width=True):
             st.session_state.selected_pathologies = ALL_PATHOLOGIES.copy()
@@ -77,10 +71,7 @@ with st.sidebar:
     selected_pathologies = st.multiselect(
         "Choose pathologies:",
         options=ALL_PATHOLOGIES,
-        default=st.session_state.selected_pathologies if st.session_state.selected_pathologies else [
-            'Atelectasis', 'Cardiomegaly', 'Effusion', 
-            'Edema', 'Pneumonia', 'Pneumothorax', 'Normal'
-        ]
+        default=st.session_state.selected_pathologies if st.session_state.selected_pathologies else DEFAULT_COMMON_PATHOLOGIES
     )
     st.session_state.selected_pathologies = selected_pathologies
     
@@ -112,6 +103,9 @@ with st.sidebar:
     st.subheader("Batch Processing")
     batch_size = st.slider("Batch Size", 1, 64 if device == 'cuda' else 16, 
                            16 if device == 'cuda' else 4)
+
+    st.subheader("🐞 Developer Tools")
+    st.session_state.debug_mode = st.checkbox("Enable debug panel", value=st.session_state.debug_mode)
     
     st.divider()
     
@@ -130,9 +124,29 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["📁 Inference", "📊 Results", "🔢 
 
 with tab1:
     st.header("Upload Images")
-    
+
+    st.caption("Guided workflow")
+    setup_ready = bool(selected_models) and bool(selected_pathologies)
+    steps = [
+        f"1) Models: {'✅' if selected_models else '⚪'}",
+        f"2) Pathologies: {'✅' if selected_pathologies else '⚪'}",
+        "3) Input source: Upload files or set folder path",
+        "4) Run inference and review results",
+    ]
+    st.markdown(" | ".join(steps))
+
+    with st.expander("Current run configuration", expanded=False):
+        st.write({
+            'models': selected_models,
+            'pathologies_count': len(selected_pathologies),
+            'device': device,
+            'batch_size': batch_size,
+        })
+
     if selected_pathologies:
         st.info(f"🎯 **Selected:** {', '.join(selected_pathologies)}")
+    else:
+        st.warning("Select at least one pathology to enable inference.")
     
     col1, col2 = st.columns([1, 1])
     
@@ -145,36 +159,46 @@ with tab1:
             key=f"uploader_{st.session_state.prediction_cache_key}"
         )
         
-        if uploaded_files and selected_models and selected_pathologies:
-            if st.button("🔍 Analyze", use_container_width=True):
+        if uploaded_files:
+            if not setup_ready:
+                st.info("Select at least one model and pathology to run analysis.")
+            if setup_ready and st.button("🔍 Analyze", use_container_width=True):
                 st.session_state.prediction_cache_key += 1
                 
+                run_started = time.perf_counter()
                 with st.spinner("Loading models..."):
-                    models = load_models(selected_models, device)
+                    models = get_cached_models(tuple(sorted(selected_models)), device)
                 
                 if models:
                     progress_bar = st.progress(0)
-                    results = []
-                    
-                    for idx, file in enumerate(uploaded_files):
-                        temp_path = Path(f"temp_{st.session_state.prediction_cache_key}_{file.name}")
-                        with open(temp_path, "wb") as f:
-                            f.write(file.getbuffer())
-                        
-                        for model_name, model in models.items():
-                            try:
-                                predictions = predict_single_image(str(temp_path), model, model_name, device)
-                                results.extend(predictions)
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
-                        
-                        temp_path.unlink()
-                        progress_bar.progress((idx + 1) / len(uploaded_files))
-                    
+
+                    def update_progress(model_idx, progress):
+                        progress_bar.progress((model_idx + progress) / len(models))
+
+                    try:
+                        results = run_upload_inference(
+                            uploaded_files,
+                            models,
+                            device,
+                            batch_size,
+                            progress_callback=update_progress,
+                        )
+                    except Exception as e:
+                        st.error(f"Upload processing failed: {str(e)}")
+                        results = []
+
                     if results:
                         df = pd.DataFrame(results)
                         df = df[df['pathology'].isin(selected_pathologies)]
                         st.session_state.results_df = df
+                        st.session_state.last_run_stats = {
+                            'mode': 'upload',
+                            'image_count': len(uploaded_files),
+                            'model_count': len(models),
+                            'rows': len(df),
+                            'device': device,
+                            'duration_sec': round(time.perf_counter() - run_started, 2),
+                        }
                         st.success(f"✅ Processed {len(uploaded_files)} images!")
     
     with col2:
@@ -196,8 +220,10 @@ with tab1:
         recursive_search = st.checkbox("Search subfolders", value=True)
         auto_label = st.checkbox("Auto-detect labels", value=True)
         
-        if folder_path and selected_models and selected_pathologies:
-            if st.button("🚀 Process", use_container_width=True):
+        if folder_path:
+            if not setup_ready:
+                st.info("Select at least one model and pathology to run batch processing.")
+            if setup_ready and st.button("🚀 Process", use_container_width=True):
                 st.session_state.prediction_cache_key += 1
                 folder = Path(folder_path)
                 
@@ -241,8 +267,9 @@ with tab1:
                     st.error(f"❌ Path exists but is not a folder: `{folder.absolute()}`")
                 else:
                     # Path is valid, proceed
+                    run_started = time.perf_counter()
                     with st.spinner("Loading models..."):
-                        models = load_models(selected_models, device)
+                        models = get_cached_models(tuple(sorted(selected_models)), device)
                     
                     if models:
                         image_paths = get_image_paths(folder, recursive=recursive_search)
@@ -268,6 +295,14 @@ with tab1:
                                 df = pd.DataFrame(all_results)
                                 df = df[df['pathology'].isin(selected_pathologies)]
                                 st.session_state.results_df = df
+                                st.session_state.last_run_stats = {
+                                    'mode': 'folder',
+                                    'image_count': len(image_paths),
+                                    'model_count': len(models),
+                                    'rows': len(df),
+                                    'device': device,
+                                    'duration_sec': round(time.perf_counter() - run_started, 2),
+                                }
                                 st.success(f"✅ Processed {len(image_paths)} images!")
                                 st.balloons()
                         else:
@@ -292,21 +327,93 @@ with tab2:
         
         st.divider()
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             model_filter = st.multiselect("Filter Model", df['model'].unique(), df['model'].unique())
         with col2:
             pathology_filter = st.multiselect("Filter Pathology", sorted(df['pathology'].unique()), [])
         with col3:
             min_prob = st.slider("Min Probability", 0.0, 1.0, 0.0, 0.05)
+        with col4:
+            preset_filter = st.selectbox("View Preset", ['All results', 'High confidence (≥0.70)', 'Top finding per image/model'])
         
         filtered_df = df[df['model'].isin(model_filter)]
         if pathology_filter:
             filtered_df = filtered_df[filtered_df['pathology'].isin(pathology_filter)]
         filtered_df = filtered_df[filtered_df['probability'] >= min_prob]
+        filtered_df = apply_results_preset(filtered_df, preset_filter)
         
+        if st.session_state.last_run_stats:
+            stats = st.session_state.last_run_stats
+            st.caption(f"Last run: mode={stats.get('mode')} | images={stats.get('image_count')} | duration={stats.get('duration_sec', 'n/a')}s")
+
+        save_col1, save_col2, save_col3 = st.columns([2,1,1])
+        with save_col1:
+            run_label = st.text_input('Run label', value=f"Run {datetime.now().strftime('%H:%M:%S')}")
+        with save_col2:
+            if st.button('💾 Save Run', use_container_width=True):
+                snapshot = create_run_snapshot(df, st.session_state.last_run_stats, run_label)
+                st.session_state.saved_runs.append(snapshot)
+                history_path = save_snapshot_to_history(snapshot)
+                st.success(f"Saved {snapshot['label']} (history: {history_path.name})")
+        with save_col3:
+            if st.button('🗑️ Clear Saved', use_container_width=True):
+                st.session_state.saved_runs = []
+                st.session_state.active_run_id = None
+                st.info('Saved runs cleared.')
+
         st.dataframe(filtered_df.sort_values('probability', ascending=False), use_container_width=True, height=400)
-        
+
+        st.subheader("Top Findings per Image")
+        if not filtered_df.empty:
+            summary_df = build_top_findings_summary(filtered_df)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No rows match the current filters.")
+
+        if st.session_state.saved_runs:
+            st.subheader('Saved Runs')
+            run_options = {f"{item['label']} ({item['rows']} rows)": item['id'] for item in st.session_state.saved_runs}
+            selected_run_label = st.selectbox('Load a saved run', list(run_options.keys()))
+            selected_run_id = run_options[selected_run_label]
+            load_col1, load_col2 = st.columns(2)
+            with load_col1:
+                if st.button('📂 Load Selected Run', use_container_width=True):
+                    selected = next((r for r in st.session_state.saved_runs if r['id'] == selected_run_id), None)
+                    if selected is not None:
+                        st.session_state.results_df = selected['results'].copy()
+                        st.session_state.last_run_stats = selected.get('stats')
+                        st.success(f"Loaded {selected['label']}")
+                        st.rerun()
+            with load_col2:
+                if st.button('❌ Delete Selected Run', use_container_width=True):
+                    st.session_state.saved_runs = [r for r in st.session_state.saved_runs if r['id'] != selected_run_id]
+                    st.success('Deleted selected run.')
+                    st.rerun()
+
+
+        st.subheader('Run History (persisted on disk)')
+        history_rows = list_run_history()
+        if history_rows:
+            history_labels = {f"{item.get('label', item.get('id'))} | {item.get('timestamp', 'n/a')}": item.get('id') for item in history_rows}
+            history_pick = st.selectbox('History records', list(history_labels.keys()))
+            history_id = history_labels[history_pick]
+            hist_col1, hist_col2 = st.columns(2)
+            with hist_col1:
+                if st.button('📥 Load History Record', use_container_width=True):
+                    history_snapshot = load_snapshot_from_history(history_id)
+                    if history_snapshot is not None:
+                        st.session_state.results_df = history_snapshot['results'].copy()
+                        st.session_state.last_run_stats = history_snapshot.get('stats')
+                        st.success(f"Loaded history run: {history_snapshot['label']}")
+                        st.rerun()
+                    else:
+                        st.error('Could not load history record.')
+            with hist_col2:
+                st.caption('History files are stored in `.run_history/` in your project directory.')
+        else:
+            st.info('No persisted run history yet. Save a run to create your first record.')
+
         csv = filtered_df.to_csv(index=False)
         st.download_button(
             "📥 Download CSV",
@@ -695,6 +802,21 @@ with tab5:
                         )
                 else:
                     st.error(stats.get('error', 'Unknown error'))
+
+
+if st.session_state.debug_mode:
+    st.divider()
+    st.subheader("🐞 Debug Panel")
+    st.json({
+        'device': device,
+        'selected_models': selected_models,
+        'selected_pathologies_count': len(selected_pathologies),
+        'cache_key': st.session_state.prediction_cache_key,
+        'last_run_stats': st.session_state.last_run_stats,
+    })
+    if st.session_state.results_df is not None:
+        st.caption("Results dataframe preview (first 5 rows)")
+        st.dataframe(st.session_state.results_df.head(5), use_container_width=True, hide_index=True)
 
 # Footer
 st.divider()
