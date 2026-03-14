@@ -6,6 +6,7 @@ import pandas as pd
 from app_services import (
     apply_results_preset,
     audit_folder_quality,
+    build_image_consensus_triage,
     build_top_findings_summary,
     create_run_snapshot,
     get_image_explainability,
@@ -52,6 +53,26 @@ class AppServicesTests(unittest.TestCase):
         )
         self.assertEqual(len(results), 2)
         self.assertEqual(progress_events, [(0, 1.0), (1, 1.0)])
+
+    def test_run_upload_inference_forwards_auto_label_flag(self):
+        files = [DummyUploadFile('Atelectasis_1.jpg', b'a')]
+        models = {'nih': object()}
+        captured = {'auto_label': None}
+
+        def fake_predict_batch(paths, model, model_name, device, batch_size, auto_label, progress_callback):
+            captured['auto_label'] = auto_label
+            return [{'model': model_name, 'filename': paths[0].name, 'pathology': 'Atelectasis', 'probability': 0.9}]
+
+        run_upload_inference(
+            files,
+            models,
+            device='cpu',
+            batch_size=1,
+            auto_label=True,
+            predict_batch_fn=fake_predict_batch,
+        )
+
+        self.assertTrue(captured['auto_label'])
 
     def test_apply_results_preset_high_confidence(self):
         df = pd.DataFrame([
@@ -104,6 +125,44 @@ class AppServicesTests(unittest.TestCase):
         explain = get_image_explainability(df, 'x.png')
         self.assertTrue(explain['available'])
         self.assertIn('top3', explain)
+
+    def test_build_image_consensus_triage_assigns_risk_bands(self):
+        df = pd.DataFrame([
+            {'filename': 'a.png', 'model': 'nih', 'pathology': 'Pneumonia', 'probability': 0.91},
+            {'filename': 'a.png', 'model': 'mimic', 'pathology': 'Pneumonia', 'probability': 0.88},
+            {'filename': 'a.png', 'model': 'chexpert', 'pathology': 'Pneumonia', 'probability': 0.84},
+            {'filename': 'b.png', 'model': 'nih', 'pathology': 'Pneumonia', 'probability': 0.62},
+            {'filename': 'b.png', 'model': 'mimic', 'pathology': 'Pneumonia', 'probability': 0.53},
+            {'filename': 'b.png', 'model': 'chexpert', 'pathology': 'Pneumonia', 'probability': 0.40},
+            {'filename': 'c.png', 'model': 'nih', 'pathology': 'Pneumonia', 'probability': 0.22},
+            {'filename': 'c.png', 'model': 'mimic', 'pathology': 'Pneumonia', 'probability': 0.19},
+            {'filename': 'c.png', 'model': 'chexpert', 'pathology': 'Pneumonia', 'probability': 0.15},
+        ])
+
+        triage = build_image_consensus_triage(df, positive_threshold=0.5, high_risk_threshold=0.75)
+        self.assertEqual(len(triage), 3)
+
+        risk_by_file = {row['filename']: row['risk_band'] for _, row in triage.iterrows()}
+        self.assertEqual(risk_by_file['a.png'], 'High')
+        self.assertEqual(risk_by_file['b.png'], 'Moderate')
+        self.assertEqual(risk_by_file['c.png'], 'Low')
+
+    def test_build_image_consensus_triage_empty_schema(self):
+        triage = build_image_consensus_triage(pd.DataFrame())
+        self.assertEqual(
+            list(triage.columns),
+            [
+                'filename',
+                'pathology',
+                'models_reporting',
+                'mean_probability',
+                'max_probability',
+                'std_probability',
+                'positive_votes',
+                'vote_fraction',
+                'risk_band',
+            ],
+        )
 
 
 if __name__ == '__main__':

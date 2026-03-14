@@ -1,19 +1,19 @@
-# Python virtual environment
+# Virtual environments
 xray_env/
 venv/
 env/
 ENV/
 .venv/
 
-# Python cache and compiled files
+# Python cache and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -29,39 +29,58 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Local app runtime/state artifacts
+.run_history/
+.app_config.json
+rename_backup_*.txt
+rename_undo_last.txt
+
+# Generated exports from the app
+predictions_*.csv
+triage_worklist_*.csv
+rename_map_*.csv
+label_report_*.csv
+batch_results_*.csv
+xray_predictions_*.csv
+roc_curve_*.html
+
+# Streamlit and notebook caches
+.streamlit/
+.ipynb_checkpoints/
+
+# Test and coverage outputs
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+pytestdebug.log
+
 # Temporary files
 temp_*
-*.tmp
-.temp/
 tmp/
+.temp/
+*.tmp
 
-# Results and outputs
-batch_results_*.csv
-roc_curve_*.html
-xray_predictions_*.csv
-*.csv
-*.html
-.run_history
-
-# Exception: Keep example files if you add them
-!example_*.csv
-!README.md
-
-# Model cache and downloads
+# Model caches/checkpoints
 .cache/
 models/
 *.pth
 *.pt
 *.ckpt
 
-# Streamlit cache
-.streamlit/
+# Environment variables and logs
+.env
+.env.local
+.env.*.local
+*.log
+logs/
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Jupyter Notebooks
-.ipynb_checkpoints/
-*.ipynb
-
-# IDE and Editor files
+# IDE/editor files
 .vscode/
 .idea/
 *.swp
@@ -73,7 +92,7 @@ models/
 *.sublime-project
 *.sublime-workspace
 
-# Operating System files
+# OS files
 .DS_Store
 .DS_Store?
 ._*
@@ -83,43 +102,12 @@ ehthumbs.db
 Thumbs.db
 Desktop.ini
 
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Logs
-*.log
-logs/
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Testing
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-.hypothesis/
-pytestdebug.log
-
-# Documentation builds
-docs/_build/
-site/
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Data directories
+# Local datasets and large archives
 data/
 dataset/
 images/
 xrays/
 samples/
-
-# Large files (optional - uncomment if needed)
 *.zip
 *.tar.gz
 *.rar

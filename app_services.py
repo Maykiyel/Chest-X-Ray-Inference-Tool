@@ -7,6 +7,7 @@ import tempfile
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 from PIL import Image, ImageStat
 import streamlit as st
@@ -30,6 +31,7 @@ def run_upload_inference(
     models: Dict,
     device: str,
     batch_size: int,
+    auto_label: bool = True,
     progress_callback: ProgressCallback = None,
     predict_batch_fn: Callable = predict_batch,
 ) -> List[dict]:
@@ -61,7 +63,7 @@ def run_upload_inference(
                 model_name,
                 device,
                 batch_size=effective_batch_size,
-                auto_label=False,
+                auto_label=auto_label,
                 progress_callback=nested_progress,
             )
             results.extend(predictions)
@@ -235,6 +237,65 @@ def get_image_explainability(results_df: pd.DataFrame, filename: str) -> dict:
         'agreement_score': agreement_score,
         'normal_confidence': round(normal_confidence, 3),
     }
+
+
+def build_image_consensus_triage(
+    results_df: pd.DataFrame,
+    positive_threshold: float = 0.5,
+    high_risk_threshold: float = 0.75,
+) -> pd.DataFrame:
+    """Aggregate model outputs into per-image triage rows for clinical prioritization."""
+    required_cols = {'filename', 'pathology', 'model', 'probability'}
+    if results_df.empty or not required_cols.issubset(results_df.columns):
+        return pd.DataFrame(columns=[
+            'filename',
+            'pathology',
+            'models_reporting',
+            'mean_probability',
+            'max_probability',
+            'std_probability',
+            'positive_votes',
+            'vote_fraction',
+            'risk_band',
+        ])
+
+    grouped = (
+        results_df
+        .groupby(['filename', 'pathology'], as_index=False)
+        .agg(
+            models_reporting=('model', 'nunique'),
+            mean_probability=('probability', 'mean'),
+            max_probability=('probability', 'max'),
+            std_probability=('probability', 'std'),
+            positive_votes=('probability', lambda s: int((s >= positive_threshold).sum())),
+        )
+    )
+
+    grouped['std_probability'] = grouped['std_probability'].fillna(0.0)
+    grouped['vote_fraction'] = np.where(
+        grouped['models_reporting'] > 0,
+        grouped['positive_votes'] / grouped['models_reporting'],
+        0.0,
+    )
+
+    def classify_risk(row: pd.Series) -> str:
+        if row['mean_probability'] >= high_risk_threshold and row['vote_fraction'] >= 0.67:
+            return 'High'
+        if row['mean_probability'] >= positive_threshold and row['vote_fraction'] >= 0.5:
+            return 'Moderate'
+        return 'Low'
+
+    grouped['risk_band'] = grouped.apply(classify_risk, axis=1)
+    grouped['mean_probability'] = grouped['mean_probability'].round(4)
+    grouped['max_probability'] = grouped['max_probability'].round(4)
+    grouped['std_probability'] = grouped['std_probability'].round(4)
+    grouped['vote_fraction'] = grouped['vote_fraction'].round(4)
+
+    return grouped.sort_values(
+        ['risk_band', 'mean_probability', 'vote_fraction', 'max_probability'],
+        ascending=[True, False, False, False],
+        key=lambda col: col.map({'High': 0, 'Moderate': 1, 'Low': 2}) if col.name == 'risk_band' else col,
+    )
 
 
 def load_app_config() -> dict:

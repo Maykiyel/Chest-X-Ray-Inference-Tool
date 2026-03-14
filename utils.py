@@ -7,6 +7,61 @@ from typing import List, Dict, Optional
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.dcm', '.dicom'}
 
 
+PATHOLOGY_NAME_MAP = {
+    'atelectasis': 'Atelectasis',
+    'cardiomegaly': 'Cardiomegaly',
+    'consolidation': 'Consolidation',
+    'edema': 'Edema',
+    'effusion': 'Effusion',
+    'emphysema': 'Emphysema',
+    'fibrosis': 'Fibrosis',
+    'hernia': 'Hernia',
+    'infiltration': 'Infiltration',
+    'mass': 'Mass',
+    'nodule': 'Nodule',
+    'pleural_thickening': 'Pleural_Thickening',
+    'pneumonia': 'Pneumonia',
+    'pneumothorax': 'Pneumothorax',
+    'covid': 'Covid',
+    'fracture': 'Fracture',
+    'normal': 'Normal',
+}
+
+
+def extract_label_from_filename(filename: str) -> Optional[Dict[str, int]]:
+    """
+    Extract pathology + binary label from filename when present.
+
+    Supported examples:
+    - atelectasis_1.jpeg -> {'Atelectasis': 1}
+    - atelectasis-0.png -> {'Atelectasis': 0}
+    - positive_pneumonia_22.jpg -> {'Pneumonia': 1}
+    - nodule_negative_case5.png -> {'Nodule': 0}
+
+    If only pathology is present (no explicit 0/1 or positive/negative marker),
+    this defaults to positive (1) for backward compatibility.
+    """
+    normalized = re.sub(r'[^a-z0-9]+', '_', filename.lower()).strip('_')
+    if not normalized:
+        return None
+
+    for pathology_key, canonical_name in PATHOLOGY_NAME_MAP.items():
+        pathology_pattern = pathology_key.replace('_', '[_]?')
+
+        negative_pattern = rf'(?:^|_)(?:negative|neg|0)_?{pathology_pattern}(?:_|$)|(?:^|_){pathology_pattern}_?(?:negative|neg|0)(?:_|$)'
+        positive_pattern = rf'(?:^|_)(?:positive|pos|1)_?{pathology_pattern}(?:_|$)|(?:^|_){pathology_pattern}_?(?:positive|pos|1)(?:_|$)'
+        pathology_only_pattern = rf'(?:^|_){pathology_pattern}(?:_|$)'
+
+        if re.search(negative_pattern, normalized):
+            return {canonical_name: 0}
+        if re.search(positive_pattern, normalized):
+            return {canonical_name: 1}
+        if re.search(pathology_only_pattern, normalized):
+            return {canonical_name: 1}
+
+    return None
+
+
 def get_image_paths(folder_path: Path, recursive: bool = True) -> List[Path]:
     """
     Get all image paths from a folder.
@@ -45,32 +100,10 @@ def extract_pathology_from_filename(filename: str) -> Optional[str]:
     Returns:
         Pathology name (capitalized) or None
     """
-    # Common pathology names
-    pathologies = [
-        'Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema',
-        'Effusion', 'Emphysema', 'Fibrosis', 'Hernia', 'Infiltration',
-        'Mass', 'Nodule', 'Pleural_Thickening', 'Pneumonia', 
-        'Pneumothorax', 'Normal', 'Covid', 'Fracture'
-    ]
-    
-    # Try exact match first (case-insensitive)
-    filename_lower = filename.lower()
-    for pathology in pathologies:
-        if filename_lower.startswith(pathology.lower() + '_'):
-            return pathology
-    
-    # Try pattern matching: Pathology_imgN
-    match = re.match(r'^([A-Za-z_]+)_img\d+', filename, re.IGNORECASE)
-    if match:
-        potential_pathology = match.group(1)
-        # Check if it matches a known pathology
-        for pathology in pathologies:
-            if potential_pathology.lower() == pathology.lower():
-                return pathology
-            # Handle underscores (e.g., Pleural_Thickening)
-            if potential_pathology.lower().replace('_', '') == pathology.lower().replace('_', ''):
-                return pathology
-    
+    label = extract_label_from_filename(filename)
+    if label:
+        return next(iter(label.keys()))
+
     return None
 
 
@@ -102,11 +135,9 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
     """
     # PRIORITY 1: Check filename first
     filename = img_path.stem  # Without extension
-    pathology_from_filename = extract_pathology_from_filename(filename)
-    
-    if pathology_from_filename:
-        # Filename contains pathology - this is a POSITIVE case
-        return {pathology_from_filename: 1}
+    label_from_filename = extract_label_from_filename(filename)
+    if label_from_filename:
+        return label_from_filename
     
     # PRIORITY 2: Check immediate folder name
     folder_name = img_path.parent.name.lower()
@@ -115,32 +146,27 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
     if 'normal' in folder_name and 'abnormal' not in folder_name:
         return {'Normal': 1}
     
-    # Common pathology names (adjust as needed)
-    pathologies = [
-        'atelectasis', 'cardiomegaly', 'consolidation', 'edema',
-        'effusion', 'emphysema', 'fibrosis', 'hernia', 'infiltration',
-        'mass', 'nodule', 'pleural_thickening', 'pneumonia', 
-        'pneumothorax', 'covid', 'fracture'
-    ]
+    # Common pathology keys (lowercase)
+    pathologies = [k for k in PATHOLOGY_NAME_MAP.keys() if k != 'normal']
     
     labels = {}
     
     # Pattern 1: pathology_positive / pathology_negative
     for pathology in pathologies:
         if f'{pathology}_positive' in folder_name or f'positive_{pathology}' in folder_name:
-            labels[pathology.capitalize()] = 1
+            labels[PATHOLOGY_NAME_MAP[pathology]] = 1
             return labels
         elif f'{pathology}_negative' in folder_name or f'negative_{pathology}' in folder_name:
-            labels[pathology.capitalize()] = 0
+            labels[PATHOLOGY_NAME_MAP[pathology]] = 0
             return labels
     
     # Pattern 2: pathology_1 / pathology_0
     for pathology in pathologies:
         if f'{pathology}_1' in folder_name or f'{pathology}1' in folder_name:
-            labels[pathology.capitalize()] = 1
+            labels[PATHOLOGY_NAME_MAP[pathology]] = 1
             return labels
         elif f'{pathology}_0' in folder_name or f'{pathology}0' in folder_name:
-            labels[pathology.capitalize()] = 0
+            labels[PATHOLOGY_NAME_MAP[pathology]] = 0
             return labels
     
     # Pattern 3: Just "positive" or "negative"
@@ -149,25 +175,25 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
         parent_folder = img_path.parent.parent.name.lower()
         for pathology in pathologies:
             if pathology in parent_folder:
-                labels[pathology.capitalize()] = 1
+                labels[PATHOLOGY_NAME_MAP[pathology]] = 1
                 return labels
         # Also check if parent is just the pathology name
         if parent_folder.replace('_', '').replace('-', '') in [p.replace('_', '') for p in pathologies]:
             for pathology in pathologies:
                 if pathology.replace('_', '') == parent_folder.replace('_', '').replace('-', ''):
-                    labels[pathology.capitalize()] = 1
+                    labels[PATHOLOGY_NAME_MAP[pathology]] = 1
                     return labels
     elif 'negative' in folder_name:
         parent_folder = img_path.parent.parent.name.lower()
         for pathology in pathologies:
             if pathology in parent_folder:
-                labels[pathology.capitalize()] = 0
+                labels[PATHOLOGY_NAME_MAP[pathology]] = 0
                 return labels
         # Also check if parent is just the pathology name
         if parent_folder.replace('_', '').replace('-', '') in [p.replace('_', '') for p in pathologies]:
             for pathology in pathologies:
                 if pathology.replace('_', '') == parent_folder.replace('_', '').replace('-', ''):
-                    labels[pathology.capitalize()] = 0
+                    labels[PATHOLOGY_NAME_MAP[pathology]] = 0
                     return labels
     
     # Pattern 4: Just pathology name in folder (assume positive)
@@ -175,7 +201,7 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
         if folder_name == pathology or folder_name.replace('_', '').replace('-', '') == pathology.replace('_', ''):
             # Folder is just the pathology name, check subfolder for pos/neg
             # If no subfolder pattern, assume it's positive
-            labels[pathology.capitalize()] = 1
+            labels[PATHOLOGY_NAME_MAP[pathology]] = 1
             return labels
     
     # Pattern 5: Check for pathology name with numeric suffix
@@ -186,7 +212,7 @@ def extract_folder_label(img_path: Path) -> Optional[Dict[str, int]]:
         
         for pathology in pathologies:
             if pathology in potential_pathology:
-                labels[pathology.capitalize()] = label_value
+                labels[PATHOLOGY_NAME_MAP[pathology]] = label_value
                 return labels
     
     # No pattern found

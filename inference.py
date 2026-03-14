@@ -310,7 +310,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
                 }
                 
                 if ground_truth is not None:
-                    result_dict['ground_truth'] = ground_truth.get(pathology, 0)
+                    result_dict['ground_truth'] = ground_truth.get(pathology)
                 
                 results.append(result_dict)
             
@@ -329,7 +329,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
             }
             
             if ground_truth is not None:
-                normal_dict['ground_truth'] = ground_truth.get('Normal', 0)
+                normal_dict['ground_truth'] = ground_truth.get('Normal')
             
             results.append(normal_dict)
         

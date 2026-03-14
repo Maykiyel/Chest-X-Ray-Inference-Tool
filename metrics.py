@@ -24,18 +24,10 @@ def compute_confusion_matrix_metrics(y_true, y_pred, threshold=0.5) -> Dict:
     # Apply threshold to get binary predictions
     y_pred_binary = (y_pred >= threshold).astype(int)
     
-    # Compute confusion matrix
-    cm = confusion_matrix(y_true, y_pred_binary)
-    
-    # Handle edge cases (e.g., all predictions are one class)
-    if cm.shape == (1, 1):
-        # Only one class present
-        if y_true[0] == 0:
-            tn, fp, fn, tp = cm[0, 0], 0, 0, 0
-        else:
-            tn, fp, fn, tp = 0, 0, 0, cm[0, 0]
-    else:
-        tn, fp, fn, tp = cm.ravel()
+    # Force 2x2 structure so single-class datasets still map correctly to
+    # Negative/Positive axes in the UI.
+    cm = confusion_matrix(y_true, y_pred_binary, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
     
     # Calculate metrics
     total = tn + fp + fn + tp
@@ -102,35 +94,22 @@ def plot_confusion_matrix_heatmap(cm, title="Confusion Matrix", labels=['Negativ
     # Create text annotations
     annotations = []
     
-    # Handle different matrix shapes
-    if cm.shape == (2, 2):
-        for i in range(2):
-            for j in range(2):
-                count = cm[i, j]
-                percentage = cm_normalized[i, j] * 100
-                annotations.append(
-                    dict(
-                        x=j,
-                        y=i,
-                        text=f'<b>{count}</b><br>({percentage:.1f}%)',
-                        font=dict(
-                            size=16, 
-                            color='white' if cm_normalized[i, j] > 0.5 else '#333'
-                        ),
-                        showarrow=False
-                    )
+    for i in range(2):
+        for j in range(2):
+            count = cm[i, j]
+            percentage = cm_normalized[i, j] * 100
+            annotations.append(
+                dict(
+                    x=j,
+                    y=i,
+                    text=f'<b>{count}</b><br>({percentage:.1f}%)',
+                    font=dict(
+                        size=16,
+                        color='white' if cm_normalized[i, j] > 0.5 else '#333'
+                    ),
+                    showarrow=False
                 )
-    else:
-        # Single class case
-        annotations.append(
-            dict(
-                x=0,
-                y=0,
-                text=f'<b>{cm[0, 0]}</b><br>(100%)',
-                font=dict(size=16, color='#333'),
-                showarrow=False
             )
-        )
     
     # Create heatmap with FIXED colorbar configuration
     fig = go.Figure(data=go.Heatmap(
@@ -284,6 +263,44 @@ def plot_threshold_comparison(y_true, y_pred):
     )
     
     return fig
+
+
+def recommend_threshold(y_true, y_pred, strategy: str = 'youden') -> Dict:
+    """Recommend a decision threshold from labeled predictions.
+
+    Supported strategies:
+    - youden: maximize sensitivity + specificity - 1
+    - f1: maximize f1_score
+    - accuracy: maximize accuracy
+    """
+    thresholds = np.arange(0.05, 0.96, 0.01)
+    if len(thresholds) == 0:
+        return {'threshold': 0.5, 'strategy': strategy, 'score': 0.0}
+
+    best_threshold = 0.5
+    best_score = -1.0
+    best_metrics = None
+
+    for threshold in thresholds:
+        metrics = compute_confusion_matrix_metrics(y_true, y_pred, threshold)
+        if strategy == 'f1':
+            score = metrics['f1_score']
+        elif strategy == 'accuracy':
+            score = metrics['accuracy']
+        else:
+            score = metrics['sensitivity'] + metrics['specificity'] - 1.0
+
+        if score > best_score:
+            best_score = score
+            best_threshold = float(threshold)
+            best_metrics = metrics
+
+    return {
+        'threshold': float(best_threshold),
+        'strategy': strategy,
+        'score': float(best_score),
+        'metrics': best_metrics,
+    }
 
 
 def find_optimal_threshold(y_true, y_pred, method='youden') -> Tuple[float, Dict]:

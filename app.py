@@ -7,12 +7,13 @@ import time
 
 from inference import predict_batch
 from utils import get_image_paths, validate_labels_in_folder
-from metrics import compute_confusion_matrix_metrics, plot_confusion_matrix_heatmap
+from metrics import compute_confusion_matrix_metrics, plot_confusion_matrix_heatmap, recommend_threshold
 from app_constants import ALL_PATHOLOGIES, DEFAULT_COMMON_PATHOLOGIES
 from app_services import (
     get_cached_models,
     run_upload_inference,
     build_top_findings_summary,
+    build_image_consensus_triage,
     apply_results_preset,
     create_run_snapshot,
     save_snapshot_to_history,
@@ -148,7 +149,15 @@ with st.sidebar:
         st.rerun()
 
 # Main tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📁 Inference", "📊 Results", "🔢 Confusion Matrix", "📝 Rename Files", "🏷️ Label Preview", "🧪 Audit & Explainability"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📁 Inference",
+    "📊 Results",
+    "🔢 Confusion Matrix",
+    "📝 Rename Files",
+    "🏷️ Label Preview",
+    "🧪 Audit & Explainability",
+    "🩺 Clinical Triage",
+])
 
 with tab1:
     st.header("Upload Images")
@@ -180,6 +189,11 @@ with tab1:
     
     with col1:
         st.subheader("Multiple Images")
+        auto_label_upload = st.checkbox(
+            "Auto-detect labels from uploaded filenames",
+            value=True,
+            help="For uploads, labels can be inferred from filenames such as pathology_1, pathology_0, positive_pathology.",
+        )
         uploaded_files = st.file_uploader(
             "Choose X-ray images",
             type=['png', 'jpg', 'jpeg', 'dcm'],
@@ -209,6 +223,7 @@ with tab1:
                             models,
                             device,
                             batch_size,
+                            auto_label=auto_label_upload,
                             progress_callback=update_progress,
                         )
                     except Exception as e:
@@ -526,16 +541,26 @@ with tab3:
             **To enable automatic confusion matrix:**
             
             1. Rename files using the **Rename Files** tab with pattern: `Pathology_img1.png`
-            2. Or organize files in folders: `pathology_positive/`, `pathology_negative/`
-            3. Ensure "Auto-detect labels" is enabled when processing
+            2. Or include filename labels like: `pathology_1.png`, `pathology_0.png`, `positive_pathology.png`
+            3. Or organize files in folders: `pathology_positive/`, `pathology_negative/`
+            4. Ensure "Auto-detect labels" is enabled when processing
             
             **Example filenames:**
             - `Pneumonia_img1.png` → Pneumonia positive
             - `Effusion_img23.png` → Effusion positive
             - `Atelectasis_img456.png` → Atelectasis positive
             """)
+            st.info(
+                "If you used file upload mode, make sure 'Auto-detect labels from uploaded filenames' was enabled before running Analyze."
+            )
         else:
-            st.success(f"✓ Ground truth detected for {df['ground_truth'].notna().sum()} predictions")
+            labeled_predictions = int(df['ground_truth'].notna().sum())
+            unlabeled_predictions = int(len(df) - labeled_predictions)
+            st.success(f"✓ Ground truth detected for {labeled_predictions} predictions")
+            if unlabeled_predictions > 0:
+                st.warning(
+                    f"⚠️ {unlabeled_predictions} predictions have no ground-truth label and will be excluded from confusion matrix metrics."
+                )
             
             # Filters
             col1, col2, col3, col4 = st.columns(4)
@@ -549,6 +574,50 @@ with tab3:
                 threshold_mode = st.selectbox('Threshold mode', list(THRESHOLD_PRESETS.keys()), index=1)
             with col4:
                 threshold = st.slider("Threshold", 0.0, 1.0, THRESHOLD_PRESETS[threshold_mode], 0.05)
+
+            selection_df = df[(df['model'] == model_cm) & (df['pathology'] == pathology_cm)]
+            selection_labeled = int(selection_df['ground_truth'].notna().sum())
+            selection_unlabeled = int(len(selection_df) - selection_labeled)
+            if selection_unlabeled > 0:
+                st.info(
+                    f"For this selection, {selection_labeled} labeled rows will be used and {selection_unlabeled} unlabeled rows will be skipped."
+                )
+
+            with st.expander("🎯 Auto-recommend threshold", expanded=False):
+                threshold_strategy = st.selectbox(
+                    "Optimization strategy",
+                    options=['youden', 'f1', 'accuracy'],
+                    help="Finds the threshold that maximizes the selected criterion on labeled rows.",
+                )
+                if st.button("Suggest threshold", use_container_width=True):
+                    threshold_df = df[
+                        (df['model'] == model_cm) &
+                        (df['pathology'] == pathology_cm) &
+                        (df['ground_truth'].notna())
+                    ].copy()
+
+                    if len(threshold_df) < 10:
+                        st.warning("At least 10 labeled rows are recommended for stable threshold suggestion.")
+
+                    if threshold_df.empty:
+                        st.error("No labeled rows available for threshold recommendation.")
+                    else:
+                        rec = recommend_threshold(
+                            threshold_df['ground_truth'].values,
+                            threshold_df['probability'].values,
+                            strategy=threshold_strategy,
+                        )
+                        st.success(
+                            f"Suggested threshold: {rec['threshold']:.2f} using {threshold_strategy.upper()} optimization "
+                            f"(score={rec['score']:.3f})."
+                        )
+                        rec_metrics = rec.get('metrics') or {}
+                        if rec_metrics:
+                            st.caption(
+                                f"Expected sensitivity={rec_metrics.get('sensitivity', 0.0):.3f}, "
+                                f"specificity={rec_metrics.get('specificity', 0.0):.3f}, "
+                                f"F1={rec_metrics.get('f1_score', 0.0):.3f}"
+                            )
             
             if st.button("📊 Generate Matrix", use_container_width=True, type="primary"):
                 # Filter data
@@ -967,6 +1036,134 @@ with tab6:
             col2.metric("Consensus pathology", explain['agreement_pathology'] or 'n/a')
             col3.metric("Normality confidence", f"{explain['normal_confidence']:.3f}")
             st.dataframe(explain['top3'], use_container_width=True, hide_index=True)
+
+
+with tab7:
+    st.header("🩺 Clinical Triage & Prioritization")
+    st.caption("Use model-consensus signals to prioritize likely positive studies for fastest review.")
+
+    if st.session_state.results_df is None or st.session_state.results_df.empty:
+        st.info("Run inference first to generate triage-ready predictions.")
+    else:
+        triage_source_df = st.session_state.results_df.copy()
+
+        triage_col1, triage_col2, triage_col3 = st.columns(3)
+        with triage_col1:
+            triage_positive_threshold = st.slider(
+                "Positive vote threshold",
+                min_value=0.05,
+                max_value=0.95,
+                value=0.50,
+                step=0.05,
+                help="A model contributes a positive vote if its probability is >= this threshold.",
+            )
+        with triage_col2:
+            triage_high_risk_threshold = st.slider(
+                "High-risk mean threshold",
+                min_value=0.10,
+                max_value=0.99,
+                value=0.75,
+                step=0.05,
+                help="Rows above this mean probability and with strong vote agreement are marked High risk.",
+            )
+        with triage_col3:
+            min_agreement = st.slider(
+                "Minimum vote fraction",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.50,
+                step=0.05,
+                help="Filter out rows where model agreement is too weak.",
+            )
+
+        triage_df = build_image_consensus_triage(
+            triage_source_df,
+            positive_threshold=triage_positive_threshold,
+            high_risk_threshold=triage_high_risk_threshold,
+        )
+
+        if triage_df.empty:
+            st.warning("No triage rows could be generated from current results.")
+        else:
+            triage_df = triage_df[triage_df['vote_fraction'] >= min_agreement].copy()
+            if triage_df.empty:
+                st.warning("No rows satisfy the selected minimum vote fraction.")
+            else:
+                filter_col1, filter_col2 = st.columns(2)
+                with filter_col1:
+                    risk_filter = st.multiselect(
+                        "Risk bands",
+                        options=['High', 'Moderate', 'Low'],
+                        default=['High', 'Moderate'],
+                    )
+                with filter_col2:
+                    pathology_options = sorted(triage_df['pathology'].unique())
+                    pathology_focus = st.multiselect(
+                        "Pathology focus",
+                        options=pathology_options,
+                        default=[],
+                    )
+
+                filtered_triage_df = triage_df.copy()
+                if risk_filter:
+                    filtered_triage_df = filtered_triage_df[filtered_triage_df['risk_band'].isin(risk_filter)]
+                if pathology_focus:
+                    filtered_triage_df = filtered_triage_df[filtered_triage_df['pathology'].isin(pathology_focus)]
+
+                high_count = int((triage_df['risk_band'] == 'High').sum())
+                moderate_count = int((triage_df['risk_band'] == 'Moderate').sum())
+                low_count = int((triage_df['risk_band'] == 'Low').sum())
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Triage Rows", int(len(triage_df)))
+                m2.metric("High Risk", high_count)
+                m3.metric("Moderate Risk", moderate_count)
+                m4.metric("Low Risk", low_count)
+
+                st.subheader("Priority Worklist")
+                st.dataframe(filtered_triage_df, use_container_width=True, hide_index=True)
+
+                if not filtered_triage_df.empty:
+                    top_case = filtered_triage_df.iloc[0]
+                    st.info(
+                        (
+                            f"Top priority now: {top_case['filename']} | {top_case['pathology']} | "
+                            f"risk={top_case['risk_band']} | mean={top_case['mean_probability']:.3f} | "
+                            f"agreement={top_case['vote_fraction']*100:.0f}%"
+                        )
+                    )
+
+                    st.subheader("Case Brief Generator")
+                    case_list = sorted(filtered_triage_df['filename'].unique())
+                    selected_case = st.selectbox("Select case", case_list)
+                    case_rows = filtered_triage_df[filtered_triage_df['filename'] == selected_case].copy()
+                    case_rows = case_rows.sort_values('mean_probability', ascending=False)
+                    st.dataframe(case_rows.head(10), use_container_width=True, hide_index=True)
+
+                    summary_lines = [
+                        f"Case: {selected_case}",
+                        f"Generated: {datetime.now().isoformat(timespec='seconds')}",
+                        "Top consensus findings:",
+                    ]
+                    for _, row in case_rows.head(5).iterrows():
+                        summary_lines.append(
+                            (
+                                f"- {row['pathology']}: risk={row['risk_band']}, mean={row['mean_probability']:.3f}, "
+                                f"max={row['max_probability']:.3f}, agreement={row['vote_fraction']*100:.0f}% "
+                                f"({int(row['positive_votes'])}/{int(row['models_reporting'])} models)"
+                            )
+                        )
+
+                    case_summary = "\n".join(summary_lines)
+                    st.text_area("Case brief", value=case_summary, height=180)
+
+                triage_csv = filtered_triage_df.to_csv(index=False)
+                st.download_button(
+                    "📥 Download Triage Worklist CSV",
+                    triage_csv,
+                    f"triage_worklist_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    "text/csv",
+                    use_container_width=True,
+                )
 
 
 
