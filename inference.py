@@ -10,6 +10,23 @@ from torch.utils.data import Dataset, DataLoader
 from utils import extract_folder_label
 import gc
 
+
+def resolve_ground_truth_for_pathology(ground_truth: dict, pathology: str):
+    """Resolve per-pathology GT and infer binary negatives where appropriate."""
+    if ground_truth is None:
+        return None
+    if pathology in ground_truth:
+        return ground_truth.get(pathology)
+
+    if ground_truth.get('Normal') == 1 and pathology != 'Normal':
+        return 0
+
+    positive_non_normal = [k for k, v in ground_truth.items() if k != 'Normal' and v == 1]
+    if len(positive_non_normal) == 1 and pathology != positive_non_normal[0] and pathology != 'Normal':
+        return 0
+
+    return None
+
 def load_models(model_names, device='cpu'):
     """
     Load TorchXRayVision models using official API.
@@ -310,7 +327,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
                 }
                 
                 if ground_truth is not None:
-                    result_dict['ground_truth'] = ground_truth.get(pathology)
+                    result_dict['ground_truth'] = resolve_ground_truth_for_pathology(ground_truth, pathology)
                 
                 results.append(result_dict)
             
@@ -329,7 +346,7 @@ def predict_batch(image_paths, model, model_name, device='cpu',
             }
             
             if ground_truth is not None:
-                normal_dict['ground_truth'] = ground_truth.get('Normal')
+                normal_dict['ground_truth'] = resolve_ground_truth_for_pathology(ground_truth, 'Normal')
             
             results.append(normal_dict)
         
