@@ -362,7 +362,13 @@ with tab1:
             if st.session_state.batch_jobs:
                 st.subheader("Batch Queue Lifecycle")
                 jobs_df = pd.DataFrame(st.session_state.batch_jobs)
-                st.dataframe(jobs_df[['job_id', 'folder_path', 'status', 'progress', 'created_at', 'message']], use_container_width=True, hide_index=True)
+                jobs_df['auto_label_mode'] = jobs_df['auto_label'].map({True: 'ON ✅', False: 'OFF ❌'})
+                jobs_df['recursive_mode'] = jobs_df['recursive'].map({True: 'ON', False: 'OFF'})
+                st.dataframe(
+                    jobs_df[['job_id', 'folder_path', 'status', 'auto_label_mode', 'recursive_mode', 'progress', 'created_at', 'message']],
+                    use_container_width=True,
+                    hide_index=True,
+                )
                 job_ids = [j['job_id'] for j in st.session_state.batch_jobs if j['status'] in ['queued', 'running']]
                 if job_ids:
                     cancel_job_id = st.selectbox('Select job to cancel', job_ids)
