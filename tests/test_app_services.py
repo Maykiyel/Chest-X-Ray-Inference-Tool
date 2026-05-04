@@ -31,7 +31,7 @@ class DummyUploadFile:
 class AppServicesTests(unittest.TestCase):
     def test_build_top_findings_summary_returns_stable_empty_schema(self):
         result = build_top_findings_summary(pd.DataFrame())
-        self.assertEqual(list(result.columns), ['filename', 'model', 'top_pathology', 'top_probability'])
+        self.assertEqual(list(result.columns), ['filename', 'model', 'top_pathology', 'top_logit'])
 
     def test_run_upload_inference_batches_and_reports_progress(self):
         files = [DummyUploadFile('a.png', b'a'), DummyUploadFile('b.png', b'b')]
@@ -79,7 +79,7 @@ class AppServicesTests(unittest.TestCase):
             {'filename': 'a', 'model': 'nih', 'pathology': 'A', 'probability': 0.65},
             {'filename': 'b', 'model': 'nih', 'pathology': 'B', 'probability': 0.91},
         ])
-        filtered = apply_results_preset(df, 'High confidence (≥0.70)')
+        filtered = apply_results_preset(df, 'High logit (≥0.847)')
         self.assertEqual(len(filtered), 1)
 
     def test_create_run_snapshot_and_history_roundtrip(self):

@@ -72,17 +72,19 @@ def run_upload_inference(
 
 
 def build_top_findings_summary(filtered_df: pd.DataFrame) -> pd.DataFrame:
-    """Return highest-probability pathology per image/model pair."""
+    """Return highest-logit pathology per image/model pair."""
     if filtered_df.empty:
-        return pd.DataFrame(columns=['filename', 'model', 'top_pathology', 'top_probability'])
+        return pd.DataFrame(columns=['filename', 'model', 'top_pathology', 'top_logit'])
 
-    return (
+    score_col = 'logit' if 'logit' in filtered_df.columns else 'probability'
+    summary = (
         filtered_df
-        .sort_values('probability', ascending=False)
+        .sort_values(score_col, ascending=False)
         .groupby(['filename', 'model'], as_index=False)
-        .first()[['filename', 'model', 'pathology', 'probability']]
-        .rename(columns={'pathology': 'top_pathology', 'probability': 'top_probability'})
+        .first()[['filename', 'model', 'pathology', score_col]]
+        .rename(columns={'pathology': 'top_pathology', score_col: 'top_logit'})
     )
+    return summary
 
 
 def apply_results_preset(df: pd.DataFrame, preset: str) -> pd.DataFrame:
@@ -90,11 +92,13 @@ def apply_results_preset(df: pd.DataFrame, preset: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    if preset == 'High confidence (≥0.70)':
-        return df[df['probability'] >= 0.70]
+    score_col = 'logit' if 'logit' in df.columns else 'probability'
+
+    if preset == 'High logit (≥0.847)':
+        return df[df[score_col] >= 0.847]
     if preset == 'Top finding per image/model':
         top_df = build_top_findings_summary(df)
-        return top_df.rename(columns={'top_pathology': 'pathology', 'top_probability': 'probability'})
+        return top_df.rename(columns={'top_pathology': 'pathology', 'top_logit': score_col})
 
     return df
 
