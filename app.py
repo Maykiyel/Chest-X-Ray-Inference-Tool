@@ -448,10 +448,11 @@ with tab2:
 
         if not filtered_df.empty and 'logit' in filtered_df.columns:
             display_df = filtered_df.copy()
-            has_gt = display_df['ground_truth'].notna()
-            is_positive_pred = display_df['logit'] >= TRUE_RESULT_LOGIT_THRESHOLD
             display_df['true_result'] = pd.NA
-            display_df.loc[has_gt, 'true_result'] = ((is_positive_pred & (display_df['ground_truth'] == 1)) | (~is_positive_pred & (display_df['ground_truth'] == 0))).loc[has_gt].astype(int)
+            if 'ground_truth' in display_df.columns:
+                has_gt = display_df['ground_truth'].notna()
+                is_positive_pred = display_df['logit'] >= TRUE_RESULT_LOGIT_THRESHOLD
+                display_df.loc[has_gt, 'true_result'] = ((is_positive_pred & (display_df['ground_truth'] == 1)) | (~is_positive_pred & (display_df['ground_truth'] == 0))).loc[has_gt].astype(int)
             st.dataframe(display_df, use_container_width=True, height=400)
         else:
             st.dataframe(filtered_df, use_container_width=True, height=400)
