@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import torch
 from pathlib import Path
 from datetime import datetime
@@ -50,6 +51,8 @@ THRESHOLD_PRESETS = {
     'Balanced': 0.50,
     'Confirmatory (high specificity)': 0.70,
 }
+
+TRUE_RESULT_LOGIT_THRESHOLD = 0.68
 
 st.title("🫁 Chest X-Ray Inference Tool")
 st.markdown("Advanced multi-model inference using TorchXRayVision")
@@ -378,7 +381,10 @@ with tab2:
     st.header("Results & Analysis")
     
     if st.session_state.results_df is not None:
-        df = st.session_state.results_df
+        df = st.session_state.results_df.copy()
+        if 'logit' not in df.columns and 'probability' in df.columns:
+            probs = df['probability'].clip(1e-6, 1 - 1e-6)
+            df['logit'] = probs.apply(lambda p: float(np.log(p / (1 - p))))
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -398,9 +404,9 @@ with tab2:
         with col2:
             pathology_filter = st.multiselect("Filter Pathology", sorted(df['pathology'].unique()), [])
         with col3:
-            min_prob = st.slider("Min Probability", 0.0, 1.0, 0.0, 0.05)
+            min_logit = st.number_input("Min Logit", value=float(-10.0), step=0.1, format='%.3f')
         with col4:
-            preset_filter = st.selectbox("View Preset", ['All results', 'High confidence (≥0.70)', 'Top finding per image/model'])
+            preset_filter = st.selectbox("View Preset", ['All results', 'High logit (≥0.847)', 'Top finding per image/model'])
 
         top_only = st.toggle('Top findings only', value=False)
         sort_preset = st.selectbox('Sort preset', ['Highest risk first', 'By model', 'By image'])
@@ -408,18 +414,18 @@ with tab2:
         filtered_df = df[df['model'].isin(model_filter)]
         if pathology_filter:
             filtered_df = filtered_df[filtered_df['pathology'].isin(pathology_filter)]
-        filtered_df = filtered_df[filtered_df['probability'] >= min_prob]
+        filtered_df = filtered_df[filtered_df['logit'] >= min_logit]
         filtered_df = apply_results_preset(filtered_df, preset_filter)
         if top_only:
             filtered_df = apply_results_preset(filtered_df, 'Top finding per image/model')
 
-        if 'probability' in filtered_df.columns:
+        if 'logit' in filtered_df.columns:
             if sort_preset == 'By model':
-                filtered_df = filtered_df.sort_values(['model', 'probability'], ascending=[True, False])
+                filtered_df = filtered_df.sort_values(['model', 'logit'], ascending=[True, False])
             elif sort_preset == 'By image':
-                filtered_df = filtered_df.sort_values(['filename', 'probability'], ascending=[True, False])
+                filtered_df = filtered_df.sort_values(['filename', 'logit'], ascending=[True, False])
             else:
-                filtered_df = filtered_df.sort_values('probability', ascending=False)
+                filtered_df = filtered_df.sort_values('logit', ascending=False)
         
         if st.session_state.last_run_stats:
             stats = st.session_state.last_run_stats
@@ -440,14 +446,18 @@ with tab2:
                 st.session_state.active_run_id = None
                 st.info('Saved runs cleared.')
 
-        if not filtered_df.empty and 'probability' in filtered_df.columns:
+        if not filtered_df.empty and 'logit' in filtered_df.columns:
             display_df = filtered_df.copy()
-            display_df['confidence_band'] = pd.cut(display_df['probability'], bins=[0,0.4,0.7,1.0], labels=['Low','Medium','High'], include_lowest=True)
+            display_df['true_result'] = pd.NA
+            if 'ground_truth' in display_df.columns:
+                has_gt = display_df['ground_truth'].notna()
+                is_positive_pred = display_df['logit'] >= TRUE_RESULT_LOGIT_THRESHOLD
+                display_df.loc[has_gt, 'true_result'] = ((is_positive_pred & (display_df['ground_truth'] == 1)) | (~is_positive_pred & (display_df['ground_truth'] == 0))).loc[has_gt].astype(int)
             st.dataframe(display_df, use_container_width=True, height=400)
         else:
             st.dataframe(filtered_df, use_container_width=True, height=400)
 
-        st.subheader("Top Findings per Image")
+        st.subheader("Top Findings per Image (Top Logit)")
         if not filtered_df.empty:
             summary_df = build_top_findings_summary(filtered_df)
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -530,7 +540,10 @@ with tab3:
     st.header("Automated Confusion Matrix")
     
     if st.session_state.results_df is not None:
-        df = st.session_state.results_df
+        df = st.session_state.results_df.copy()
+        if 'logit' not in df.columns and 'probability' in df.columns:
+            probs = df['probability'].clip(1e-6, 1 - 1e-6)
+            df['logit'] = probs.apply(lambda p: float(np.log(p / (1 - p))))
         
         # Check if ground truth is available
         has_ground_truth = 'ground_truth' in df.columns and df['ground_truth'].notna().any()
@@ -573,7 +586,7 @@ with tab3:
             with col3:
                 threshold_mode = st.selectbox('Threshold mode', list(THRESHOLD_PRESETS.keys()), index=1)
             with col4:
-                threshold = st.slider("Threshold", 0.0, 1.0, THRESHOLD_PRESETS[threshold_mode], 0.05)
+                threshold = st.number_input('Logit Threshold', value=0.0, step=0.1, format='%.3f')
 
             selection_df = df[(df['model'] == model_cm) & (df['pathology'] == pathology_cm)]
             selection_labeled = int(selection_df['ground_truth'].notna().sum())
@@ -604,7 +617,7 @@ with tab3:
                     else:
                         rec = recommend_threshold(
                             threshold_df['ground_truth'].values,
-                            threshold_df['probability'].values,
+                            threshold_df['logit'].values,
                             strategy=threshold_strategy,
                         )
                         st.success(
@@ -629,7 +642,7 @@ with tab3:
                     # Compute metrics
                     metrics = compute_confusion_matrix_metrics(
                         cm_data['ground_truth'].values,
-                        cm_data['probability'].values,
+                        cm_data['logit'].values,
                         threshold
                     )
                     
@@ -638,7 +651,7 @@ with tab3:
                     
                     fig = plot_confusion_matrix_heatmap(
                         metrics['confusion_matrix'],
-                        title=f"{model_cm.upper()} - {pathology_cm} (Threshold: {threshold})"
+                        title=f"{model_cm.upper()} - {pathology_cm} (Logit threshold: {threshold})"
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
@@ -669,7 +682,7 @@ with tab3:
                             st.write(f"**FNR:** {metrics['fnr']:.3f}")
                         
                         st.write(f"**Total Samples:** {metrics['total']}")
-                        st.write(f"**Threshold:** {metrics['threshold']:.3f}")
+                        st.write(f"**Logit Threshold:** {metrics['threshold']:.3f}")
                 else:
                     st.error("No data with ground truth for this model/pathology combination")
     else:
